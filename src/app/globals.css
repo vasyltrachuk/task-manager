@@ -1,0 +1,364 @@
+/* Google Fonts - Inter */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  /* Brand Colors */
+  --color-brand-50: #EEF2FF;
+  --color-brand-100: #E0E7FF;
+  --color-brand-200: #C7D2FE;
+  --color-brand-400: #818CF8;
+  --color-brand-500: #6366F1;
+  --color-brand-600: #4F46E5;
+  --color-brand-700: #4338CA;
+
+  /* Surface Colors */
+  --color-surface-0: #FFFFFF;
+  --color-surface-50: #F8FAFC;
+  --color-surface-100: #F1F5F9;
+  --color-surface-200: #E2E8F0;
+  --color-surface-300: #CBD5E1;
+
+  /* Text Colors */
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94A3B8;
+
+  /* Status Colors */
+  --color-status-todo: #6B7280;
+  --color-status-progress: #3B82F6;
+  --color-status-clarification: #F59E0B;
+  --color-status-review: #8B5CF6;
+  --color-status-done: #10B981;
+  --color-status-overdue: #EF4444;
+
+  /* Task Type Colors */
+  --color-type-tax: #3B82F6;
+  --color-type-payroll: #8B5CF6;
+  --color-type-reconciliation: #10B981;
+  --color-type-audit: #6366F1;
+  --color-type-license: #F59E0B;
+  --color-type-onboarding: #EC4899;
+  --color-type-other: #6B7280;
+
+  /* Load Colors */
+  --color-load-optimal: #10B981;
+  --color-load-heavy: #F59E0B;
+  --color-load-overload: #EF4444;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.15), 0 8px 20px rgba(0, 0, 0, 0.1);
+
+  /* Border Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Sidebar */
+  --sidebar-width: 240px;
+
+  /* Typography scale */
+  --font-scale: 1;
+  --text-xs: calc(0.75rem * var(--font-scale));
+  --text-sm: calc(0.875rem * var(--font-scale));
+  --text-base: calc(1rem * var(--font-scale));
+  --text-lg: calc(1.125rem * var(--font-scale));
+  --text-xl: calc(1.25rem * var(--font-scale));
+  --text-2xl: calc(1.5rem * var(--font-scale));
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-surface-50);
+    color: var(--color-text-primary);
+    line-height: 1.5;
+  }
+
+  /* Scrollbar Styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-300);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-muted);
+  }
+}
+
+@layer components {
+
+  /* Card base */
+  .card {
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-surface-200);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+
+  .card:hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  /* Clients card hover: no lift/elevation, subtle highlight feedback */
+  .client-card {
+    transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  /* Badge */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  .badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Status badges */
+  .badge-todo {
+    color: var(--color-status-todo);
+    background: #F3F4F6;
+  }
+
+  .badge-in_progress {
+    color: var(--color-status-progress);
+    background: #EFF6FF;
+  }
+
+  .badge-clarification {
+    color: var(--color-status-clarification);
+    background: #FFFBEB;
+  }
+
+  .badge-review {
+    color: var(--color-status-review);
+    background: #F5F3FF;
+  }
+
+  .badge-done {
+    color: var(--color-status-done);
+    background: #ECFDF5;
+  }
+
+  .badge-overdue {
+    color: var(--color-status-overdue);
+    background: #FEF2F2;
+  }
+
+  .workers {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-surface-200);
+  }
+
+  /* Client type badges */
+  .badge-active {
+    color: var(--color-status-done);
+    background: #ECFDF5;
+  }
+
+  .badge-onboarding {
+    color: var(--color-status-progress);
+    background: #EFF6FF;
+  }
+
+  /* Priority indicator */
+  .priority-high {
+    color: var(--color-status-overdue);
+  }
+
+  .priority-medium {
+    color: var(--color-status-clarification);
+  }
+
+  .priority-low {
+    color: var(--color-text-muted);
+  }
+
+  /* Kanban column */
+  .kanban-column {
+    min-width: 280px;
+    max-width: 320px;
+    flex-shrink: 0;
+  }
+
+  /* Drop zone */
+  .drop-zone {
+    border: 2px dashed var(--color-surface-300);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    text-align: center;
+    color: var(--color-text-muted);
+    transition: border-color 0.2s, background 0.2s;
+  }
+
+  .drop-zone:hover,
+  .drop-zone.active {
+    border-color: var(--color-brand-400);
+    background: var(--color-brand-50);
+    color: var(--color-brand-600);
+  }
+
+  /* Sidebar nav item */
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    position: relative;
+  }
+
+  .nav-item:hover {
+    background: var(--color-surface-100);
+    color: var(--color-text-primary);
+  }
+
+  .nav-item.active {
+    background: var(--color-brand-50);
+    color: var(--color-brand-600);
+    font-weight: 600;
+  }
+
+  .nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 3px;
+    background: var(--color-brand-600);
+    border-radius: 0 2px 2px 0;
+  }
+
+  /* Stat card */
+  .stat-card {
+    padding: 20px 24px;
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-surface-200);
+    border-radius: var(--radius-lg);
+  }
+
+  .stat-card .stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .stat-card .stat-label {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    font-weight: 500;
+    margin-top: 4px;
+  }
+
+  /* Upload zone */
+  .upload-zone {
+    border: 2px dashed var(--color-brand-200);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--color-surface-50);
+  }
+
+  .upload-zone:hover {
+    border-color: var(--color-brand-400);
+    background: var(--color-brand-50);
+  }
+
+  /* Tag/pill filter */
+  .filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 16px;
+    border-radius: 999px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border: 1px solid var(--color-surface-200);
+    background: var(--color-surface-0);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .filter-pill:hover {
+    border-color: var(--color-brand-400);
+    color: var(--color-brand-600);
+  }
+
+  .filter-pill.active {
+    background: var(--color-brand-600);
+    color: white;
+    border-color: var(--color-brand-600);
+  }
+
+  /* Activity timeline */
+  .activity-item {
+    display: flex;
+    gap: 12px;
+    padding: 8px 0;
+    position: relative;
+  }
+
+  .activity-item::before {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 24px;
+    bottom: -8px;
+    width: 1px;
+    background: var(--color-surface-200);
+  }
+
+  .activity-item:last-child::before {
+    display: none;
+  }
+}
