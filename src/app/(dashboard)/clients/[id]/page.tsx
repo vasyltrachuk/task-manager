@@ -315,7 +315,7 @@ export default function ClientProfilePage() {
     if (!client) {
         return (
             <div className="p-8">
-                <div className="card p-8 max-w-xl">
+                <div className="card p-6 max-w-xl">
                     <h1 className="text-xl font-bold text-text-primary mb-2">Клієнта не знайдено</h1>
                     <p className="text-sm text-text-muted mb-5">
                         Можливо, запис було видалено або архівовано.
@@ -335,7 +335,7 @@ export default function ClientProfilePage() {
     if (!canViewClient(state.currentUser, client)) {
         return (
             <div className="p-8">
-                <div className="card p-8 max-w-xl">
+                <div className="card p-6 max-w-xl">
                     <h1 className="text-xl font-bold text-text-primary mb-2">Немає доступу</h1>
                     <p className="text-sm text-text-muted mb-5">
                         Ви не можете переглядати цього клієнта.
@@ -658,7 +658,7 @@ export default function ClientProfilePage() {
                     </table>
 
                     {licenses.length === 0 && (
-                        <div className="p-8 text-center text-sm text-text-muted">
+                        <div className="p-6 text-center text-sm text-text-muted">
                             По цьому клієнту ще немає ліцензій.
                         </div>
                     )}
@@ -740,7 +740,7 @@ export default function ClientProfilePage() {
                         </table>
 
                         {clientInvoices.length === 0 && (
-                            <div className="p-8 text-center text-sm text-text-muted">
+                            <div className="p-6 text-center text-sm text-text-muted">
                                 Рахунків поки немає.
                             </div>
                         )}

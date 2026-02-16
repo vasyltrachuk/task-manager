@@ -69,7 +69,7 @@ export default function SettingsPage() {
     }
 
     return (
-        <div className="p-8 max-w-5xl space-y-6">
+        <div className="p-6 max-w-5xl space-y-6">
             <div>
                 <h1 className="text-2xl font-bold text-text-primary mb-2">Налаштування</h1>
                 <p className="text-sm text-text-muted">Керуйте параметрами системи та податковими правилами для автоконтролю.</p>

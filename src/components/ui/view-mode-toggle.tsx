@@ -20,17 +20,6 @@ export default function ViewModeToggle({ value, onChange, className }: ViewModeT
             )}
         >
             <button
-                onClick={() => onChange('board')}
-                aria-pressed={value === 'board'}
-                className={cn(
-                    'flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors',
-                    value === 'board' ? 'bg-brand-600 text-white' : 'text-text-secondary hover:bg-surface-50'
-                )}
-            >
-                <KanbanSquare size={14} />
-                Дошка
-            </button>
-            <button
                 onClick={() => onChange('list')}
                 aria-pressed={value === 'list'}
                 className={cn(
@@ -40,6 +29,17 @@ export default function ViewModeToggle({ value, onChange, className }: ViewModeT
             >
                 <List size={14} />
                 Список
+            </button>
+            <button
+                onClick={() => onChange('board')}
+                aria-pressed={value === 'board'}
+                className={cn(
+                    'flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors',
+                    value === 'board' ? 'bg-brand-600 text-white' : 'text-text-secondary hover:bg-surface-50'
+                )}
+            >
+                <KanbanSquare size={14} />
+                Дошка
             </button>
         </div>
     );

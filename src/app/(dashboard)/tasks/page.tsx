@@ -236,7 +236,7 @@ export default function TaskBoardPage() {
         : null;
 
     return (
-        <div className="p-8 h-screen flex flex-col">
+        <div className="p-6 h-screen flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between mb-6 flex-shrink-0">
                 <div className="flex items-center gap-4">
@@ -269,6 +269,7 @@ export default function TaskBoardPage() {
             {/* Toolbar */}
             <div className="flex items-center gap-3 mb-5 flex-wrap flex-shrink-0">
                 <ViewModeToggle value={viewMode} onChange={setViewMode} />
+                <div className="h-6 w-px bg-surface-200 mx-1" />
 
                 <button className="flex items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text-primary px-3 py-2 rounded-lg hover:bg-surface-100 transition-colors">
                     <User size={14} />

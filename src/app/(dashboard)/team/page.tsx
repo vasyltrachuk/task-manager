@@ -121,7 +121,7 @@ export default function TeamLoadPage() {
     };
 
     return (
-        <div className="p-8 h-screen flex flex-col">
+        <div className="p-6 h-screen flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between mb-6 flex-shrink-0">
                 <div className="flex items-center gap-4">

@@ -384,7 +384,7 @@ export default function LicensesPage() {
     }
 
     return (
-        <div className="p-8">
+        <div className="p-6">
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
                     <h1 className="text-2xl font-bold text-text-primary">Контроль ліцензій</h1>
@@ -449,6 +449,7 @@ export default function LicensesPage() {
 
             <div className="flex items-center gap-3 mb-6 flex-wrap">
                 <ViewModeToggle value={viewMode} onChange={setViewMode} />
+                <div className="h-6 w-px bg-surface-200 mx-1" />
                 <div className="flex items-center gap-2 flex-wrap">
                     {filterTabs.map((tab) => (
                         <button

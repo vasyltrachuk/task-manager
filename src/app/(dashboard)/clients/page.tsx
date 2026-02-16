@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Search, Plus, Users, Pencil, Archive, ShieldCheck } from 'lucide-react';
-import { Client, CLIENT_TAX_ID_TYPE_LABELS } from '@/lib/types';
+import { Client, CLIENT_TAX_ID_TYPE_LABELS, Profile } from '@/lib/types';
 import { useApp } from '@/lib/store';
 import { cn, getInitials, formatMoneyUAH } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
@@ -11,11 +11,9 @@ import { getTaxSystemLabel, isSingleTaxSystem, isVatPayerByTaxSystem } from '@/l
 import { calculateClientBillingSnapshot, formatMinorMoneyUAH, normalizeInvoiceStatus } from '@/lib/billing';
 import ClientFormModal from '@/components/clients/client-form-modal';
 import TaskFormModal from '@/components/tasks/task-form-modal';
-import ViewModeToggle from '@/components/ui/view-mode-toggle';
 import { canCreateTask, canManageClients, canViewClient, getVisibleClientsForUser } from '@/lib/rbac';
 
 type FilterTab = 'all' | 'fop' | 'llc' | 'vat' | 'onboarding';
-type ClientViewMode = 'board' | 'list';
 
 const filterTabs: { key: FilterTab; label: string }[] = [
     { key: 'all', label: 'Усі клієнти' },
@@ -68,17 +66,11 @@ function parseFilterTab(value: string | null): FilterTab {
     return filterTabs.some((tab) => tab.key === value) ? (value as FilterTab) : 'all';
 }
 
-function parseViewMode(value: string | null): ClientViewMode {
-    return value === 'list' ? 'list' : 'board';
-}
-
 function buildClientsListQuery({
     filter,
-    viewMode,
     searchQuery,
 }: {
     filter: FilterTab;
-    viewMode: ClientViewMode;
     searchQuery: string;
 }): string {
     const params = new URLSearchParams();
@@ -86,9 +78,6 @@ function buildClientsListQuery({
 
     if (filter !== 'all') {
         params.set('filter', filter);
-    }
-    if (viewMode !== 'board') {
-        params.set('view', viewMode);
     }
     if (normalizedQuery) {
         params.set('q', normalizedQuery);
@@ -100,6 +89,7 @@ function buildClientsListQuery({
 function ClientCard({
     client,
     licenseStats,
+    currentUserId,
     onOpen,
     onEdit,
     onArchive,
@@ -109,6 +99,7 @@ function ClientCard({
 }: {
     client: Client;
     licenseStats: ClientLicenseStats;
+    currentUserId: string;
     onOpen: (client: Client) => void;
     onEdit: (client: Client) => void;
     onArchive: (clientId: string) => void;
@@ -204,7 +195,7 @@ function ClientCard({
             </div>
 
             {/* Details */}
-            <div className="details space-y-3 text-xs">
+            <div className="details space-y-4 text-xs">
                 <div className="flex flex-wrap gap-x-8 gap-y-3 justify-between">
                     <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
                         <span className="text-text-muted">Система</span>
@@ -229,58 +220,68 @@ function ClientCard({
                     </div>
 
                 </div>
-                {client.accountants && client.accountants.length > 0 && (
-                    <div className="workers">
-                        <span className="text-text-muted flex items-center gap-1.5">
-                            Бухгалтери ({client.accountants.length})
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                            {/* Stacked avatars */}
-                            <div className="flex -space-x-2">
-                                {client.accountants.slice(0, 4).map((acc, i) => {
-                                    const accColors = [
-                                        'bg-blue-100 text-blue-700 border-blue-200',
-                                        'bg-emerald-100 text-emerald-700 border-emerald-200',
-                                        'bg-purple-100 text-purple-700 border-purple-200',
-                                        'bg-amber-100 text-amber-700 border-amber-200',
-                                        'bg-rose-100 text-rose-700 border-rose-200',
-                                    ];
-                                    const cIdx = acc.full_name.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % accColors.length;
-                                    return (
+                {client.accountants && client.accountants.length > 0 && (() => {
+                    const iAmHere = client.accountants.some(a => a.id === currentUserId);
+                    const othersCount = client.accountants.length - (iAmHere ? 1 : 0);
+                    const otherNames = client.accountants.filter(a => a.id !== currentUserId).map(a => a.full_name);
+                    const tooltipText = client.accountants.map(a => a.id === currentUserId ? 'Ви' : a.full_name).join(', ');
+
+                    return (
+                        <div className="workers">
+                            <span className="text-text-muted flex items-center gap-1.5">
+                                Бухгалтери ({client.accountants.length})
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                                <div className="flex -space-x-2">
+                                    {client.accountants.slice(0, 4).map((acc, i) => {
+                                        const isMe = acc.id === currentUserId;
+                                        const accColors = [
+                                            'bg-blue-100 text-blue-700 border-blue-200',
+                                            'bg-emerald-100 text-emerald-700 border-emerald-200',
+                                            'bg-purple-100 text-purple-700 border-purple-200',
+                                            'bg-amber-100 text-amber-700 border-amber-200',
+                                            'bg-rose-100 text-rose-700 border-rose-200',
+                                        ];
+                                        const cIdx = acc.full_name.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % accColors.length;
+                                        return (
+                                            <div
+                                                key={acc.id}
+                                                title={isMe ? 'Ви' : acc.full_name}
+                                                className={cn(
+                                                    'w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-bold border-2 border-white',
+                                                    accColors[cIdx]
+                                                )}
+                                                style={{ zIndex: 10 - i }}
+                                            >
+                                                {getInitials(acc.full_name)}
+                                            </div>
+                                        );
+                                    })}
+                                    {client.accountants.length > 4 && (
                                         <div
-                                            key={acc.id}
-                                            title={acc.full_name}
-                                            className={cn(
-                                                'w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-bold border-2 border-white',
-                                                accColors[cIdx]
-                                            )}
-                                            style={{ zIndex: 10 - i }}
+                                            className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-bold border-2 border-white bg-surface-200 text-text-secondary"
+                                            style={{ zIndex: 5 }}
                                         >
-                                            {getInitials(acc.full_name)}
+                                            +{client.accountants.length - 4}
                                         </div>
-                                    );
-                                })}
-                                {client.accountants.length > 4 && (
-                                    <div
-                                        className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-bold border-2 border-white bg-surface-200 text-text-secondary"
-                                        style={{ zIndex: 5 }}
-                                    >
-                                        +{client.accountants.length - 4}
-                                    </div>
-                                )}
-                            </div>
-                            {/* Names list */}
-                            <div className="flex-1 min-w-0">
-                                <span className="text-text-primary font-medium truncate block">
-                                    {client.accountants.length <= 2
-                                        ? client.accountants.map(a => a.full_name).join(', ')
-                                        : `${client.accountants[0].full_name} +${client.accountants.length - 1}`
-                                    }
-                                </span>
+                                    )}
+                                </div>
+                                <div className="flex-1 min-w-0" title={tooltipText}>
+                                    <span className="text-text-primary font-medium truncate block">
+                                        {iAmHere
+                                            ? othersCount > 0
+                                                ? `Ви +${othersCount}`
+                                                : 'Ви'
+                                            : client.accountants.length <= 2
+                                                ? client.accountants.map(a => a.full_name).join(', ')
+                                                : `${client.accountants[0].full_name} +${client.accountants.length - 1}`
+                                        }
+                                    </span>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
             </div>
         </div>
     );
@@ -292,7 +293,6 @@ function ClientsPageContent() {
     const searchParams = useSearchParams();
     const [activeFilter, setActiveFilter] = useState<FilterTab>(() => parseFilterTab(searchParams.get('filter')));
     const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '');
-    const [viewMode, setViewMode] = useState<ClientViewMode>(() => parseViewMode(searchParams.get('view')));
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
     const [taskClientId, setTaskClientId] = useState<string | null>(null);
@@ -380,12 +380,10 @@ function ClientsPageContent() {
 
     const updateListRoute = (next: {
         filter?: FilterTab;
-        viewMode?: ClientViewMode;
         searchQuery?: string;
     }) => {
         const query = buildClientsListQuery({
             filter: next.filter ?? activeFilter,
-            viewMode: next.viewMode ?? viewMode,
             searchQuery: next.searchQuery ?? searchQuery,
         });
         router.replace(query ? `/clients?${query}` : '/clients', { scroll: false });
@@ -404,7 +402,6 @@ function ClientsPageContent() {
 
         const query = buildClientsListQuery({
             filter: activeFilter,
-            viewMode,
             searchQuery,
         });
         router.push(query ? `/clients/${client.id}?${query}` : `/clients/${client.id}`);
@@ -429,7 +426,7 @@ function ClientsPageContent() {
     };
 
     return (
-        <div className="p-8">
+        <div className="p-6">
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
@@ -465,13 +462,6 @@ function ClientsPageContent() {
 
             {/* Toolbar */}
             <div className="flex items-center gap-3 mb-6 flex-wrap">
-                <ViewModeToggle
-                    value={viewMode}
-                    onChange={(nextViewMode) => {
-                        setViewMode(nextViewMode);
-                        updateListRoute({ viewMode: nextViewMode });
-                    }}
-                />
                 <div className="flex items-center gap-2 flex-wrap">
                     {filterTabs.map((tab) => (
                         <button
@@ -488,14 +478,25 @@ function ClientsPageContent() {
                 </div>
             </div>
 
-            {/* Client Grid / List */}
-            {viewMode === 'board' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {/* Results count */}
+            <div className="flex items-center justify-between mb-4">
+                <p className="text-sm text-text-muted">
+                    {filteredClients.length === allClients.length
+                        ? `${filteredClients.length} клієнтів`
+                        : `${filteredClients.length} з ${allClients.length} клієнтів`
+                    }
+                </p>
+            </div>
+
+            {/* Mobile: Card Board (visible only on small screens) */}
+            <div className="block md:hidden">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {filteredClients.map((client) => (
                         <ClientCard
                             key={client.id}
                             client={client}
                             licenseStats={licenseStatsByClient[client.id] || { total: 0, critical: 0 }}
+                            currentUserId={state.currentUser.id}
                             onOpen={handleOpenDetails}
                             onEdit={handleEdit}
                             onArchive={handleArchive}
@@ -505,165 +506,192 @@ function ClientsPageContent() {
                         />
                     ))}
                 </div>
-            ) : (
+            </div>
+
+            {/* Desktop: Table List (visible only on medium+ screens) */}
+            <div className="hidden md:block">
                 <div className="card overflow-hidden">
                     <table className="w-full">
                         <thead>
                             <tr className="border-b border-surface-200 bg-surface-50">
-                                <th className="text-left text-xs font-semibold text-text-muted px-4 py-3">Клієнт</th>
-                                <th className="text-left text-xs font-semibold text-text-muted px-4 py-3">Система оподаткування</th>
-                                <th className="text-left text-xs font-semibold text-text-muted px-4 py-3">Ліміт доходу</th>
-                                <th className="text-left text-xs font-semibold text-text-muted px-4 py-3">Бухгалтери</th>
-                                <th className="text-left text-xs font-semibold text-text-muted px-4 py-3">Ліцензії</th>
-                                <th className="text-left text-xs font-semibold text-text-muted px-4 py-3">Оплати</th>
-                                <th className="text-left text-xs font-semibold text-text-muted px-4 py-3">Дії</th>
+                                <th className="text-left text-xs font-semibold text-text-muted px-5 py-3">Клієнт</th>
+                                <th className="text-left text-xs font-semibold text-text-muted px-5 py-3">Система оподаткування</th>
+                                <th className="text-left text-xs font-semibold text-text-muted px-5 py-3">Ліміт доходу</th>
+                                <th className="text-left text-xs font-semibold text-text-muted px-5 py-3">Бухгалтери</th>
+                                <th className="text-left text-xs font-semibold text-text-muted px-5 py-3">Ліцензії</th>
+                                <th className="text-left text-xs font-semibold text-text-muted px-5 py-3">Оплати</th>
+                                <th className="text-left text-xs font-semibold text-text-muted px-5 py-3">Дії</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredClients.map(client => (
-                                <tr
-                                    key={client.id}
-                                    onClick={() => handleOpenDetails(client)}
-                                    className="border-b border-surface-100 hover:bg-surface-50 transition-colors cursor-pointer"
-                                >
-                                    <td className="px-4 py-3">
-                                        <div className="text-sm font-medium text-text-primary">{getClientDisplayName(client)}</div>
-                                        <div className="text-xs text-text-muted">
-                                            {CLIENT_TAX_ID_TYPE_LABELS[client.tax_id_type]}: {client.tax_id}
-                                        </div>
-                                        {client.status === 'onboarding' && (
-                                            <div className="text-[11px] text-status-progress font-medium mt-0.5">
-                                                Онбординг
-                                            </div>
+                            {filteredClients.map((client, index) => {
+                                const displayName = getClientDisplayName(client);
+                                const initials = getInitials(displayName);
+                                const colors = [
+                                    'bg-blue-100 text-blue-700',
+                                    'bg-emerald-100 text-emerald-700',
+                                    'bg-amber-100 text-amber-700',
+                                    'bg-purple-100 text-purple-700',
+                                    'bg-rose-100 text-rose-700',
+                                    'bg-indigo-100 text-indigo-700',
+                                    'bg-teal-100 text-teal-700',
+                                ];
+                                const colorIndex = displayName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
+
+                                return (
+                                    <tr
+                                        key={client.id}
+                                        onClick={() => handleOpenDetails(client)}
+                                        className={cn(
+                                            'hover:bg-brand-50/40 transition-colors cursor-pointer group',
+                                            index < filteredClients.length - 1 && 'border-b border-surface-100'
                                         )}
-                                    </td>
-                                    <td className="px-4 py-3 text-sm">
-                                        <div className="font-medium text-text-primary">
-                                            {getTaxSystemLabel(client.tax_system)}
-                                        </div>
-                                        <div className={cn(
-                                            'text-xs',
-                                            isVatPayerByTaxSystem(client.tax_system) ? 'text-status-done' : 'text-text-muted'
-                                        )}>
-                                            {isVatPayerByTaxSystem(client.tax_system) ? 'Платник ПДВ' : 'Без ПДВ'}
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-3 text-sm">
-                                        <span className={cn(
-                                            'font-medium',
-                                            client.income_limit ? 'text-brand-700' : 'text-text-muted'
-                                        )}>
-                                            {client.income_limit ? formatMoneyUAH(client.income_limit) : 'Немає'}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        {client.accountants && client.accountants.length > 0 ? (
-                                            <div className="flex items-center gap-2">
-                                                <div className="flex -space-x-1.5">
-                                                    {client.accountants.slice(0, 3).map((acc) => (
-                                                        <div
-                                                            key={acc.id}
-                                                            title={acc.full_name}
-                                                            className="w-6 h-6 rounded-full bg-surface-200 flex items-center justify-center text-[9px] font-bold text-text-secondary border-2 border-white"
-                                                        >
-                                                            {getInitials(acc.full_name)}
-                                                        </div>
-                                                    ))}
-                                                    {client.accountants.length > 3 && (
-                                                        <div className="w-6 h-6 rounded-full bg-surface-200 flex items-center justify-center text-[9px] font-bold text-text-secondary border-2 border-white">
-                                                            +{client.accountants.length - 3}
+                                    >
+                                        <td className="px-5 py-3.5">
+                                            <div className="flex items-center gap-3">
+                                                <div className={cn(
+                                                    'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0',
+                                                    colors[colorIndex]
+                                                )}>
+                                                    {initials}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="text-sm font-semibold text-text-primary truncate">{displayName}</div>
+                                                    <div className="text-xs text-text-muted">
+                                                        {CLIENT_TAX_ID_TYPE_LABELS[client.tax_id_type]}: {client.tax_id}
+                                                    </div>
+                                                    {client.status === 'onboarding' && (
+                                                        <span className="inline-flex items-center gap-1 text-[11px] text-status-progress font-medium mt-0.5">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-status-progress" />
+                                                            Онбординг
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-5 py-3.5 text-sm">
+                                            <div className="font-medium text-text-primary">
+                                                {getTaxSystemLabel(client.tax_system)}
+                                            </div>
+                                            <div className={cn(
+                                                'text-xs',
+                                                isVatPayerByTaxSystem(client.tax_system) ? 'text-status-done' : 'text-text-muted'
+                                            )}>
+                                                {isVatPayerByTaxSystem(client.tax_system) ? 'Платник ПДВ' : 'Без ПДВ'}
+                                            </div>
+                                        </td>
+                                        <td className="px-5 py-3.5 text-sm">
+                                            <span className={cn(
+                                                'font-medium',
+                                                client.income_limit ? 'text-brand-700' : 'text-text-muted'
+                                            )}>
+                                                {client.income_limit ? formatMoneyUAH(client.income_limit) : 'Немає'}
+                                            </span>
+                                        </td>
+                                        <td className="px-5 py-3.5">
+                                            {client.accountants && client.accountants.length > 0 ? (() => {
+                                                const isMe = (acc: Profile) => acc.id === state.currentUser.id;
+                                                const iAmHere = client.accountants.some(isMe);
+                                                const othersCount = client.accountants.length - (iAmHere ? 1 : 0);
+                                                const tooltipText = client.accountants.map(a => isMe(a) ? 'Ви' : a.full_name).join(', ');
+
+                                                return (
+                                                    <div className="flex items-center gap-2" title={tooltipText}>
+                                                        <span className="text-xs text-text-secondary truncate max-w-[160px]">
+                                                            {iAmHere
+                                                                ? othersCount > 0
+                                                                    ? `Ви +${othersCount}`
+                                                                    : 'Ви'
+                                                                : client.accountants.length <= 2
+                                                                    ? client.accountants.map(a => a.full_name).join(', ')
+                                                                    : `${client.accountants[0].full_name} +${client.accountants.length - 1}`
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })() : (
+                                                <span className="text-xs text-text-muted">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-5 py-3.5">
+                                            {(licenseStatsByClient[client.id]?.total || 0) > 0 ? (
+                                                <div className="text-xs">
+                                                    <div className="font-medium text-text-primary">
+                                                        {licenseStatsByClient[client.id]?.total || 0} активних
+                                                    </div>
+                                                    {(licenseStatsByClient[client.id]?.critical || 0) > 0 && (
+                                                        <div className="text-red-600 font-medium">
+                                                            {licenseStatsByClient[client.id]?.critical || 0} крит.
                                                         </div>
                                                     )}
                                                 </div>
-                                                <span className="text-xs text-text-secondary truncate max-w-[120px]">
-                                                    {client.accountants.length <= 2
-                                                        ? client.accountants.map(a => a.full_name).join(', ')
-                                                        : `${client.accountants[0].full_name} +${client.accountants.length - 1}`
-                                                    }
-                                                </span>
-                                            </div>
-                                        ) : (
-                                            <span className="text-xs text-text-muted">—</span>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        {(licenseStatsByClient[client.id]?.total || 0) > 0 ? (
-                                            <div className="text-xs">
-                                                <div className="font-medium text-text-primary">
-                                                    {licenseStatsByClient[client.id]?.total || 0} активних записів
-                                                </div>
-                                                {(licenseStatsByClient[client.id]?.critical || 0) > 0 && (
-                                                    <div className="text-red-600 font-medium">
-                                                        {licenseStatsByClient[client.id]?.critical || 0} критичних
+                                            ) : (
+                                                <span className="text-xs text-text-muted">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-5 py-3.5">
+                                            {billingStatsByClient[client.id]?.outstanding_minor ? (
+                                                <div className="text-xs">
+                                                    <div className={cn(
+                                                        'font-medium',
+                                                        (billingStatsByClient[client.id]?.overdue_invoices || 0) > 0
+                                                            ? 'text-red-600'
+                                                            : 'text-amber-700'
+                                                    )}>
+                                                        {formatMinorMoneyUAH(billingStatsByClient[client.id]?.outstanding_minor || 0)}
                                                     </div>
+                                                    {(billingStatsByClient[client.id]?.overdue_invoices || 0) > 0 ? (
+                                                        <div className="text-red-600 font-medium">
+                                                            {(billingStatsByClient[client.id]?.overdue_invoices || 0)} простроч.
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-text-muted">
+                                                            До оплати: {(billingStatsByClient[client.id]?.open_invoices || 0)}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-status-done font-medium">Немає боргу</span>
+                                            )}
+                                        </td>
+                                        <td className="px-5 py-3.5">
+                                            <div className="flex items-center gap-1">
+                                                {canQuickCreateTask && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleQuickCreateTask(client); }}
+                                                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-brand-50 text-text-muted hover:text-brand-600 transition-colors"
+                                                        title="+ Нове завдання"
+                                                    >
+                                                        <Plus size={13} />
+                                                    </button>
+                                                )}
+                                                {canManageClient && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
+                                                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-brand-50 text-text-muted hover:text-brand-600 transition-colors"
+                                                        title="Редагувати"
+                                                    >
+                                                        <Pencil size={13} />
+                                                    </button>
+                                                )}
+                                                {canManageClient && client.status !== 'archived' && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleArchive(client.id); }}
+                                                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors"
+                                                        title="Архівувати"
+                                                    >
+                                                        <Archive size={13} />
+                                                    </button>
                                                 )}
                                             </div>
-                                        ) : (
-                                            <span className="text-xs text-text-muted">—</span>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        {billingStatsByClient[client.id]?.outstanding_minor ? (
-                                            <div className="text-xs">
-                                                <div className={cn(
-                                                    'font-medium',
-                                                    (billingStatsByClient[client.id]?.overdue_invoices || 0) > 0
-                                                        ? 'text-red-600'
-                                                        : 'text-amber-700'
-                                                )}>
-                                                    {formatMinorMoneyUAH(billingStatsByClient[client.id]?.outstanding_minor || 0)}
-                                                </div>
-                                                {(billingStatsByClient[client.id]?.overdue_invoices || 0) > 0 ? (
-                                                    <div className="text-red-600 font-medium">
-                                                        {(billingStatsByClient[client.id]?.overdue_invoices || 0)} простроч.
-                                                    </div>
-                                                ) : (
-                                                    <div className="text-text-muted">
-                                                        До оплати: {(billingStatsByClient[client.id]?.open_invoices || 0)}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ) : (
-                                            <span className="text-xs text-status-done font-medium">Немає боргу</span>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        <div className="flex items-center gap-1">
-                                            {canQuickCreateTask && (
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleQuickCreateTask(client); }}
-                                                    className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-brand-50 text-text-muted hover:text-brand-600 transition-colors"
-                                                    title="+ Нове завдання"
-                                                >
-                                                    <Plus size={13} />
-                                                </button>
-                                            )}
-                                            {canManageClient && (
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-                                                    className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-brand-50 text-text-muted hover:text-brand-600 transition-colors"
-                                                    title="Редагувати"
-                                                >
-                                                    <Pencil size={13} />
-                                                </button>
-                                            )}
-                                            {canManageClient && client.status !== 'archived' && (
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleArchive(client.id); }}
-                                                    className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors"
-                                                    title="Архівувати"
-                                                >
-                                                    <Archive size={13} />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
-            )}
+            </div>
 
             {/* Empty State */}
             {filteredClients.length === 0 && (
@@ -701,7 +729,7 @@ function ClientsPageContent() {
 
 export default function ClientsPage() {
     return (
-        <Suspense fallback={<div className="p-8 text-sm text-text-muted">Завантаження клієнтів...</div>}>
+        <Suspense fallback={<div className="p-6 text-sm text-text-muted">Завантаження клієнтів...</div>}>
             <ClientsPageContent />
         </Suspense>
     );

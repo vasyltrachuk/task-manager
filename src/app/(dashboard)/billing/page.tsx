@@ -94,7 +94,7 @@ export default function BillingPage() {
     if (!canAccessBilling(state.currentUser)) {
         return (
             <div className="p-8">
-                <div className="card p-8 max-w-xl">
+                <div className="card p-6 max-w-xl">
                     <h1 className="text-xl font-bold text-text-primary mb-2">Немає доступу</h1>
                     <p className="text-sm text-text-muted">Ви не маєте прав для перегляду оплат.</p>
                 </div>
@@ -103,7 +103,7 @@ export default function BillingPage() {
     }
 
     return (
-        <div className="p-8">
+        <div className="p-6">
             <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
                 <div>
                     <h1 className="text-2xl font-bold text-text-primary">Оплати клієнтів</h1>
@@ -216,7 +216,7 @@ export default function BillingPage() {
                     </table>
 
                     {filteredInvoices.length === 0 && (
-                        <div className="p-8 text-center text-sm text-text-muted">
+                        <div className="p-6 text-center text-sm text-text-muted">
                             Рахунків за поточними фільтрами не знайдено.
                         </div>
                     )}

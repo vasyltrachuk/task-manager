@@ -17,9 +17,16 @@ import {
 import { cn, getInitials } from '@/lib/utils';
 import { USER_ROLE_LABELS } from '@/lib/types';
 import { useApp } from '@/lib/store';
-import { isAdmin } from '@/lib/rbac';
+import { isAdmin, getVisibleTasksForUser } from '@/lib/rbac';
 
-const adminNavItems = [
+interface NavItem {
+    href: string;
+    label: string;
+    icon: typeof LayoutDashboard;
+    badge?: number;
+}
+
+const adminNavItems: NavItem[] = [
     { href: '/', label: 'Огляд', icon: LayoutDashboard },
     { href: '/clients', label: 'Клієнти', icon: Users },
     { href: '/tasks', label: 'Завдання', icon: KanbanSquare },
@@ -28,7 +35,7 @@ const adminNavItems = [
     { href: '/team', label: 'Команда', icon: BarChart3 },
 ];
 
-const accountantNavItems = [
+const accountantNavItems: NavItem[] = [
     { href: '/clients', label: 'Клієнти', icon: Users },
     { href: '/tasks', label: 'Завдання', icon: KanbanSquare },
     { href: '/billing', label: 'Оплати', icon: Wallet },
@@ -45,7 +52,16 @@ export default function Sidebar() {
     const currentUser = state.currentUser;
     const isCurrentUserAdmin = isAdmin(currentUser);
 
-    const navItems = isCurrentUserAdmin ? adminNavItems : accountantNavItems;
+    const navItems = useMemo(() => {
+        const base = isCurrentUserAdmin ? adminNavItems : accountantNavItems;
+        if (isCurrentUserAdmin) return base;
+        const todoCount = getVisibleTasksForUser(state.tasks, currentUser)
+            .filter(t => t.status === 'todo').length;
+        if (todoCount === 0) return base;
+        return base.map(item =>
+            item.href === '/tasks' ? { ...item, badge: todoCount } : item
+        );
+    }, [isCurrentUserAdmin, state.tasks, currentUser]);
     const settingsItems = isCurrentUserAdmin ? adminSettingsItems : [];
     const switchableProfiles = useMemo(
         () => state.profiles.filter((profile) =>
@@ -83,7 +99,12 @@ export default function Sidebar() {
                             href={item.href}
                             className={cn('nav-item', isActive && 'active')}
                         >
-                            <item.icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
+                            <div className="relative">
+                                <item.icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
+                                {item.badge && item.badge > 0 && (
+                                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" />
+                                )}
+                            </div>
                             <span>{item.label}</span>
                         </Link>
                     );
@@ -91,9 +112,6 @@ export default function Sidebar() {
 
                 {settingsItems.length > 0 && (
                     <div className="pt-4 mt-4 border-t border-surface-200">
-                        <div className="px-4 pb-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider">
-                            Налаштування
-                        </div>
                         {settingsItems.map((item) => {
                             const isActive = pathname.startsWith(item.href);
                             return (
