@@ -312,33 +312,29 @@
   /* Sidebar tooltip — portal-based, fixed to viewport */
   .nav-tooltip {
     position: fixed;
-    left: calc(var(--sidebar-collapsed-width) + 2px);
+    top: var(--sidebar-tooltip-top, 0px);
+    left: var(--sidebar-tooltip-left, 0px);
     transform: translateY(-50%);
-    padding: 6px 12px;
-    background: var(--color-text-primary);
-    color: white;
+    display: flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 8px 14px;
+    padding-left: 4px;
+    background: var(--color-surface-100);
+    color: var(--color-text-primary);
     font-size: 0.875rem;
     font-weight: 600;
-    border-radius: var(--radius-md);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
     white-space: nowrap;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.12s ease;
+    transition: opacity 0.08s ease-out;
+    will-change: opacity;
     z-index: 60;
   }
 
   .nav-tooltip.visible {
     opacity: 1;
-  }
-
-  .nav-tooltip::before {
-    content: '';
-    position: absolute;
-    right: 100%;
-    top: 50%;
-    transform: translateY(-50%);
-    border: 5px solid transparent;
-    border-right-color: var(--color-text-primary);
   }
 
   /* Stat card */

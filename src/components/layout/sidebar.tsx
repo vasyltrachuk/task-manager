@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -50,14 +50,33 @@ const adminSettingsItems = [
 
 interface Tooltip {
     label: string;
-    top: number;
+    variant: 'default' | 'active';
+    visible: boolean;
 }
 
-function SidebarTooltip({ label, top }: Tooltip) {
+const subscribe = () => () => {};
+
+function SidebarTooltip({
+    label,
+    variant,
+    visible,
+    tooltipRef,
+}: Tooltip & { tooltipRef: React.RefObject<HTMLDivElement | null> }) {
+    const isMounted = useSyncExternalStore(subscribe, () => true, () => false);
+    const isActive = variant === 'active';
+
+    // Keep SSR and first client render identical; only create a portal after mount.
+    if (!isMounted) return null;
+
     return createPortal(
         <div
-            className="nav-tooltip visible"
-            style={{ top }}
+            ref={tooltipRef}
+            className={cn('nav-tooltip', visible && 'visible')}
+            aria-hidden={!visible}
+            style={{
+                backgroundColor: isActive ? 'var(--color-brand-50)' : 'var(--color-surface-100)',
+                color: isActive ? 'var(--color-brand-600)' : 'var(--color-text-primary)',
+            }}
         >
             {label}
         </div>,
@@ -70,8 +89,12 @@ export default function Sidebar() {
     const { state, setCurrentUser } = useApp();
     const [isExpanded, setIsExpanded] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-    const [tooltip, setTooltip] = useState<Tooltip | null>(null);
-    const hideTimeout = useRef<ReturnType<typeof setTimeout>>(null);
+    const tooltipRef = useRef<HTMLDivElement>(null);
+    const [tooltip, setTooltip] = useState<Tooltip>({
+        label: '',
+        variant: 'default',
+        visible: false,
+    });
     const currentUser = state.currentUser;
     const isCurrentUserAdmin = isAdmin(currentUser);
 
@@ -98,11 +121,6 @@ export default function Sidebar() {
         setIsUserMenuOpen(false);
     }, []);
 
-    // Collapse on navigation
-    useEffect(() => {
-        collapse();
-    }, [pathname, collapse]);
-
     // Close on Escape
     useEffect(() => {
         if (!isExpanded) return;
@@ -113,15 +131,28 @@ export default function Sidebar() {
         return () => document.removeEventListener('keydown', handleKeyDown);
     }, [isExpanded, collapse]);
 
-    const showTooltip = useCallback((e: React.MouseEvent, label: string) => {
-        if (isExpanded) return;
-        if (hideTimeout.current) clearTimeout(hideTimeout.current);
+    const showTooltip = useCallback((
+        e: React.PointerEvent<HTMLElement>,
+        label: string,
+        variant: Tooltip['variant'] = 'default'
+    ) => {
+        if (isExpanded || e.pointerType === 'touch') return;
+
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        setTooltip({ label, top: rect.top + rect.height / 2 });
+
+        if (tooltipRef.current) {
+            tooltipRef.current.style.setProperty('--sidebar-tooltip-top', `${rect.top + rect.height / 2}px`);
+            tooltipRef.current.style.setProperty('--sidebar-tooltip-left', `${rect.right - 8}px`);
+        }
+
+        setTooltip((prev) => {
+            if (prev.label === label && prev.variant === variant && prev.visible) return prev;
+            return { label, variant, visible: true };
+        });
     }, [isExpanded]);
 
     const hideTooltip = useCallback(() => {
-        hideTimeout.current = setTimeout(() => setTooltip(null), 100);
+        setTooltip(prev => (prev.visible ? { ...prev, visible: false } : prev));
     }, []);
 
     return (
@@ -160,8 +191,9 @@ export default function Sidebar() {
                                 key={item.href}
                                 href={item.href}
                                 className={cn('nav-item', isActive && 'active')}
-                                onMouseEnter={(e) => showTooltip(e, item.label)}
-                                onMouseLeave={hideTooltip}
+                                onClick={collapse}
+                                onPointerEnter={(e) => showTooltip(e, item.label, isActive ? 'active' : 'default')}
+                                onPointerLeave={hideTooltip}
                             >
                                 <div className="relative nav-icon">
                                     <item.icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
@@ -183,8 +215,9 @@ export default function Sidebar() {
                                         key={item.href}
                                         href={item.href}
                                         className={cn('nav-item', isActive && 'active')}
-                                        onMouseEnter={(e) => showTooltip(e, item.label)}
-                                        onMouseLeave={hideTooltip}
+                                        onClick={collapse}
+                                        onPointerEnter={(e) => showTooltip(e, item.label, isActive ? 'active' : 'default')}
+                                        onPointerLeave={hideTooltip}
                                     >
                                         <div className="nav-icon">
                                             <item.icon size={18} strokeWidth={1.8} />
@@ -209,8 +242,8 @@ export default function Sidebar() {
                             }
                         }}
                         className="flex items-center gap-3 w-full px-2 py-2 rounded-lg hover:bg-surface-100 transition-colors"
-                        onMouseEnter={(e) => showTooltip(e, currentUser.full_name)}
-                        onMouseLeave={hideTooltip}
+                        onPointerEnter={(e) => showTooltip(e, currentUser.full_name)}
+                        onPointerLeave={hideTooltip}
                     >
                         <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 text-sm font-semibold flex-shrink-0">
                             {getInitials(currentUser.full_name)}
@@ -252,7 +285,7 @@ export default function Sidebar() {
             </aside>
 
             {/* Portal tooltip — renders outside sidebar overflow */}
-            {tooltip && !isExpanded && <SidebarTooltip {...tooltip} />}
+            {!isExpanded && <SidebarTooltip {...tooltip} tooltipRef={tooltipRef} />}
         </>
     );
 }
