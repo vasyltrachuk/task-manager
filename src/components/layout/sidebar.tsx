@@ -201,7 +201,7 @@ export default function Sidebar() {
                                         <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" />
                                     )}
                                 </div>
-                                {isExpanded && <span>{item.label}</span>}
+                                <span className="nav-label">{item.label}</span>
                             </Link>
                         );
                     })}
@@ -222,7 +222,7 @@ export default function Sidebar() {
                                         <div className="nav-icon">
                                             <item.icon size={18} strokeWidth={1.8} />
                                         </div>
-                                        {isExpanded && <span>{item.label}</span>}
+                                        <span className="nav-label">{item.label}</span>
                                     </Link>
                                 );
                             })}

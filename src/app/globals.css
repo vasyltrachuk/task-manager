@@ -275,10 +275,11 @@
     padding: 10px 16px;
     border-radius: var(--radius-md);
     font-size: 0.875rem;
+    line-height: 18px;
     font-weight: 500;
     color: var(--color-text-secondary);
     text-decoration: none;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, color 0.15s ease;
     position: relative;
     white-space: nowrap;
   }
@@ -307,6 +308,18 @@
 
   .nav-item .nav-icon {
     flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+  }
+
+  .nav-item .nav-label {
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
   }
 
   /* Sidebar tooltip — portal-based, fixed to viewport */
