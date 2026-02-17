@@ -12,7 +12,7 @@ export default function DashboardLayout({
         <AppProvider>
             <div className="flex min-h-screen bg-surface-50">
                 <Sidebar />
-                <main className="flex-1 min-w-0" style={{ marginLeft: 'var(--sidebar-width)' }}>
+                <main className="flex-1 min-w-0" style={{ marginLeft: 'var(--sidebar-collapsed-width)' }}>
                     {children}
                 </main>
             </div>
