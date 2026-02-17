@@ -24,6 +24,12 @@ import { applyIncomeLimitRulebook, normalizeClientIncomeLimit } from './tax';
 import { normalizeClientName } from './client-name';
 import { getInvoiceOutstandingMinor, normalizeInvoiceStatus } from './billing';
 import {
+    buildTaxProfile,
+    resolveObligations,
+    ResolvedObligation,
+    TaxProfile,
+} from './tax-profile';
+import {
     canAccessBilling,
     canCreateTask,
     canManageBillingForClient,
@@ -437,6 +443,8 @@ interface AppContextType {
     getTasksByAssignee: (assigneeId: string) => Task[];
     getTasksByClient: (clientId: string) => Task[];
     getLicensesByClient: (clientId: string) => License[];
+    getClientTaxProfile: (clientId: string) => TaxProfile | undefined;
+    getClientObligations: (clientId: string) => ResolvedObligation[];
     getBillingPlansByClient: (clientId: string) => BillingPlan[];
     getInvoicesByClient: (clientId: string) => Invoice[];
     getPaymentsByClient: (clientId: string) => Payment[];
@@ -1236,6 +1244,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return state.licenses.filter(l => l.client_id === clientId);
     }, [state.clients, state.currentUser, state.licenses]);
 
+    const getClientTaxProfile = useCallback((clientId: string) => {
+        const client = state.clients.find((item) => item.id === clientId);
+        if (!client || !canViewClient(state.currentUser, client)) {
+            return undefined;
+        }
+
+        const licenses = state.licenses.filter((license) => license.client_id === clientId);
+        return buildTaxProfile({ client, licenses });
+    }, [state.clients, state.currentUser, state.licenses]);
+
+    const getClientObligations = useCallback((clientId: string) => {
+        const profile = getClientTaxProfile(clientId);
+        if (!profile) return [];
+        return resolveObligations(profile);
+    }, [getClientTaxProfile]);
+
     const getBillingPlansByClient = useCallback((clientId: string) => {
         const client = state.clients.find((item) => item.id === clientId);
         if (!client || !canViewClient(state.currentUser, client)) {
@@ -1303,7 +1327,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             addComment, logActivity,
             getTaskById, getClientById, getLicenseById, getProfileById,
             getTasksByStatus, getTasksByAssignee, getTasksByClient,
-            getLicensesByClient, getBillingPlansByClient, getInvoicesByClient, getPaymentsByClient,
+            getLicensesByClient, getClientTaxProfile, getClientObligations,
+            getBillingPlansByClient, getInvoicesByClient, getPaymentsByClient,
             getActivityForTask,
         }}>
             {children}

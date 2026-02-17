@@ -48,6 +48,11 @@ import {
     getTaxComplianceNotes,
     getTaxSystemLabel,
 } from '@/lib/tax';
+import {
+    TAX_PROFILE_CADENCE_LABELS,
+    TAX_PROFILE_RISK_FLAG_LABELS,
+    TAX_PROFILE_SUBJECT_LABELS,
+} from '@/lib/tax-profile';
 import TaskFormModal from '@/components/tasks/task-form-modal';
 import LicenseFormModal from '@/components/licenses/license-form-modal';
 import {
@@ -117,7 +122,7 @@ function formatDaysLeft(daysLeft?: number): string {
 }
 
 export default function ClientProfilePage() {
-    const { state, addTask } = useApp();
+    const { state, addTask, getClientTaxProfile, getClientObligations } = useApp();
     const router = useRouter();
     const searchParams = useSearchParams();
     const params = useParams<{ id: string }>();
@@ -190,6 +195,31 @@ export default function ClientProfilePage() {
         () => calculateClientBillingSnapshot(clientId, clientInvoices, clientPayments),
         [clientId, clientInvoices, clientPayments]
     );
+
+    const taxProfile = useMemo(() => {
+        if (!client) return undefined;
+        return getClientTaxProfile(client.id);
+    }, [client, getClientTaxProfile]);
+
+    const taxObligations = useMemo(() => {
+        if (!client) return [];
+        return getClientObligations(client.id);
+    }, [client, getClientObligations]);
+
+    const obligationsByCadence = useMemo(() => {
+        const groups: Record<'monthly' | 'quarterly' | 'annual' | 'event', typeof taxObligations> = {
+            monthly: [],
+            quarterly: [],
+            annual: [],
+            event: [],
+        };
+
+        taxObligations.forEach((obligation) => {
+            groups[obligation.cadence].push(obligation);
+        });
+
+        return groups;
+    }, [taxObligations]);
 
     const activeTasks = tasks.filter((task) => task.status !== 'done');
     const completedTasks = tasks.filter((task) => task.status === 'done');
@@ -462,6 +492,98 @@ export default function ClientProfilePage() {
                                 {taxComplianceNotes.slice(0, 2).map((note) => (
                                     <p key={note} className="text-sm text-text-secondary">{note}</p>
                                 ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {taxProfile && (
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                            <div className="card p-5">
+                                <h2 className="text-sm font-bold text-text-primary uppercase tracking-wide mb-4">
+                                    Податковий профіль
+                                </h2>
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-text-muted">Subject</span>
+                                        <span className="font-medium text-text-primary">{TAX_PROFILE_SUBJECT_LABELS[taxProfile.subject]}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-text-muted">VAT</span>
+                                        <span className={cn('font-medium', taxProfile.is_vat_payer ? 'text-status-done' : 'text-text-secondary')}>
+                                            {taxProfile.is_vat_payer ? 'Платник ПДВ' : 'Без ПДВ'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-text-muted">Працівники</span>
+                                        <span className={cn('font-medium', taxProfile.has_employees ? 'text-text-primary' : 'text-text-secondary')}>
+                                            {taxProfile.has_employees
+                                                ? `${taxProfile.employee_count} активних`
+                                                : 'Немає працівників'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-text-muted">Ліцензії</span>
+                                        <span className={cn('font-medium', taxProfile.has_licenses ? 'text-text-primary' : 'text-text-secondary')}>
+                                            {taxProfile.has_licenses
+                                                ? `${taxProfile.license_types.length} тип(ів)`
+                                                : 'Немає ліцензій'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {taxProfile.risk_flags.length > 0 && (
+                                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                                        <p className="text-xs font-semibold text-amber-700">
+                                            Недостатньо даних для повного профілю.
+                                        </p>
+                                        <div className="mt-1 space-y-1">
+                                            {taxProfile.risk_flags.map((flag) => (
+                                                <p key={flag} className="text-xs text-amber-700">
+                                                    {TAX_PROFILE_RISK_FLAG_LABELS[flag]}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="card p-5">
+                                <h2 className="text-sm font-bold text-text-primary uppercase tracking-wide mb-4">
+                                    Активні обов&apos;язки
+                                </h2>
+
+                                {taxObligations.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {(Object.keys(obligationsByCadence) as Array<keyof typeof obligationsByCadence>)
+                                            .map((cadence) => {
+                                                const obligations = obligationsByCadence[cadence];
+                                                if (obligations.length === 0) return null;
+
+                                                return (
+                                                    <div key={cadence}>
+                                                        <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5">
+                                                            {TAX_PROFILE_CADENCE_LABELS[cadence]}
+                                                        </p>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {obligations.map((obligation) => (
+                                                                <span
+                                                                    key={obligation.code}
+                                                                    title={obligation.description}
+                                                                    className="inline-flex items-center rounded-full border border-surface-200 bg-surface-50 px-3 py-1 text-xs text-text-secondary"
+                                                                >
+                                                                    {obligation.title}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-text-muted">
+                                        Для цього клієнта поки немає застосовних обов&apos;язків.
+                                    </p>
+                                )}
                             </div>
                         </div>
                     )}

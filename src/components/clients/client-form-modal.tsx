@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { X, Building2, User, Phone, Mail, Hash, FileText } from 'lucide-react';
 import {
     Client,
@@ -23,6 +23,13 @@ import {
 } from '@/lib/tax';
 import { canManageClients } from '@/lib/rbac';
 import { normalizeClientName } from '@/lib/client-name';
+import {
+    buildTaxProfile,
+    resolveObligations,
+    TAX_PROFILE_CADENCE_LABELS,
+    TAX_PROFILE_RISK_FLAG_LABELS,
+    TAX_PROFILE_SUBJECT_LABELS,
+} from '@/lib/tax-profile';
 
 interface ClientFormModalProps {
     isOpen: boolean;
@@ -103,6 +110,75 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
     const autoIncomeLimit = calculateIncomeLimitByTaxSystem(formData.tax_system, state.taxRulebook);
     const usesRulebookIncomeLimit = isSingleTaxSystem(formData.tax_system || undefined);
     const isVatPayer = isVatPayerByTaxSystem(formData.tax_system || undefined);
+    const previewClient = useMemo<Client>(() => {
+        const normalizedName = normalizeClientName(formData.name);
+
+        return {
+            id: editClient?.id || 'preview-client',
+            name: normalizedName || formData.name || '—',
+            type: formData.type,
+            tax_id_type: formData.tax_id_type,
+            tax_id: formData.tax_id.trim(),
+            status: formData.status,
+            tax_system: formData.tax_system || undefined,
+            is_vat_payer: isVatPayerByTaxSystem(formData.tax_system || undefined),
+            income_limit: usesRulebookIncomeLimit ? autoIncomeLimit : undefined,
+            income_limit_source: usesRulebookIncomeLimit ? 'rulebook' : undefined,
+            contact_phone: formData.contact_phone || undefined,
+            contact_email: formData.contact_email || undefined,
+            employee_count: formData.employee_count || undefined,
+            industry: formData.industry || undefined,
+            notes: formData.notes || undefined,
+            accountants: assignees.filter((assignee) => formData.assignee_ids.includes(assignee.id)),
+            created_at: editClient?.created_at || '1970-01-01T00:00:00.000Z',
+            updated_at: editClient?.updated_at || '1970-01-01T00:00:00.000Z',
+        };
+    }, [
+        assignees,
+        autoIncomeLimit,
+        editClient?.created_at,
+        editClient?.id,
+        editClient?.updated_at,
+        formData.assignee_ids,
+        formData.contact_email,
+        formData.contact_phone,
+        formData.employee_count,
+        formData.industry,
+        formData.name,
+        formData.notes,
+        formData.status,
+        formData.tax_id,
+        formData.tax_id_type,
+        formData.tax_system,
+        formData.type,
+        usesRulebookIncomeLimit,
+    ]);
+    const previewLicenses = useMemo(
+        () => (editClient ? state.licenses.filter((license) => license.client_id === editClient.id) : []),
+        [editClient, state.licenses]
+    );
+    const previewTaxProfile = useMemo(
+        () => buildTaxProfile({ client: previewClient, licenses: previewLicenses }),
+        [previewClient, previewLicenses]
+    );
+    const previewObligations = useMemo(
+        () => resolveObligations(previewTaxProfile),
+        [previewTaxProfile]
+    );
+    const previewObligationsByCadence = useMemo(() => {
+        const groups: Record<'monthly' | 'quarterly' | 'annual' | 'event', typeof previewObligations> = {
+            monthly: [],
+            quarterly: [],
+            annual: [],
+            event: [],
+        };
+
+        previewObligations.forEach((obligation) => {
+            groups[obligation.cadence].push(obligation);
+        });
+
+        return groups;
+    }, [previewObligations]);
 
     const validate = () => {
         const e: Record<string, string> = {};
@@ -425,6 +501,96 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
                             <p className="text-xs text-text-muted mt-2">
                                 Ліміт автоматично застосовується для ЄП 1/2/3 (з або без ПДВ)/4. Параметри редагуються в Налаштуваннях.
                             </p>
+                        </div>
+                    </div>
+
+                    {/* Tax profile preview */}
+                    <div className="rounded-xl border border-surface-200 bg-white p-4 space-y-4">
+                        <div>
+                            <h3 className="text-sm font-bold text-text-primary">Податковий профіль (preview)</h3>
+                            <p className="text-xs text-text-muted mt-1">
+                                Профіль формується автоматично з введених полів і каталогу обов&apos;язків.
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                            <div className="rounded-lg border border-surface-200 bg-surface-50 px-3 py-2">
+                                <p className="text-xs text-text-muted">Subject</p>
+                                <p className="font-semibold text-text-primary">
+                                    {TAX_PROFILE_SUBJECT_LABELS[previewTaxProfile.subject]}
+                                </p>
+                            </div>
+                            <div className="rounded-lg border border-surface-200 bg-surface-50 px-3 py-2">
+                                <p className="text-xs text-text-muted">VAT</p>
+                                <p className={cn('font-semibold', previewTaxProfile.is_vat_payer ? 'text-status-done' : 'text-text-primary')}>
+                                    {previewTaxProfile.is_vat_payer ? 'Платник ПДВ' : 'Без ПДВ'}
+                                </p>
+                            </div>
+                            <div className="rounded-lg border border-surface-200 bg-surface-50 px-3 py-2">
+                                <p className="text-xs text-text-muted">Працівники</p>
+                                <p className="font-semibold text-text-primary">
+                                    {previewTaxProfile.has_employees ? `${previewTaxProfile.employee_count} активних` : 'Немає працівників'}
+                                </p>
+                            </div>
+                            <div className="rounded-lg border border-surface-200 bg-surface-50 px-3 py-2">
+                                <p className="text-xs text-text-muted">Ліцензії</p>
+                                <p className="font-semibold text-text-primary">
+                                    {previewTaxProfile.has_licenses ? `${previewTaxProfile.license_types.length} тип(ів)` : 'Немає ліцензій'}
+                                </p>
+                            </div>
+                        </div>
+
+                        {previewTaxProfile.risk_flags.length > 0 && (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                                <p className="text-xs font-semibold text-amber-700">
+                                    Недостатньо даних для повного профілю.
+                                </p>
+                                <div className="mt-1 space-y-1">
+                                    {previewTaxProfile.risk_flags.map((flag) => (
+                                        <p key={flag} className="text-xs text-amber-700">
+                                            {TAX_PROFILE_RISK_FLAG_LABELS[flag]}
+                                        </p>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                                Активні обов&apos;язки
+                            </p>
+                            {previewObligations.length > 0 ? (
+                                <div className="space-y-2">
+                                    {(Object.keys(previewObligationsByCadence) as Array<keyof typeof previewObligationsByCadence>)
+                                        .map((cadence) => {
+                                            const obligations = previewObligationsByCadence[cadence];
+                                            if (obligations.length === 0) return null;
+
+                                            return (
+                                                <div key={cadence}>
+                                                    <p className="text-[11px] font-semibold text-text-muted mb-1">
+                                                        {TAX_PROFILE_CADENCE_LABELS[cadence]}
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {obligations.map((obligation) => (
+                                                            <span
+                                                                key={obligation.code}
+                                                                title={obligation.description}
+                                                                className="inline-flex items-center rounded-full border border-surface-200 bg-surface-50 px-3 py-1 text-xs text-text-secondary"
+                                                            >
+                                                                {obligation.title}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                </div>
+                            ) : (
+                                <p className="text-sm text-text-muted">
+                                    Для поточного набору полів обов&apos;язки ще не визначені.
+                                </p>
+                            )}
                         </div>
                     </div>
 
