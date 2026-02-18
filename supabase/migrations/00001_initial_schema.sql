@@ -66,7 +66,7 @@ CREATE TABLE clients (
   tenant_id           uuid NOT NULL REFERENCES tenants(id),
   name                text NOT NULL,
   type                text NOT NULL,
-  tax_id_type         text NOT NULL DEFAULT 'ipn',
+  tax_id_type         text NOT NULL DEFAULT 'rnokpp',
   tax_id              text NOT NULL,
   status              text NOT NULL DEFAULT 'onboarding',
   tax_system          text,

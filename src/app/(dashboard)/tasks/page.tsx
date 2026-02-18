@@ -15,7 +15,8 @@ import {
     Task, TaskStatus, TASK_STATUS_LABELS, TASK_STATUS_COLORS,
     TASK_TYPE_LABELS, TASK_TYPE_COLORS,
 } from '@/lib/types';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
+import { useTasks, useMoveTask } from '@/lib/hooks/use-tasks';
 import { cn, isOverdue, formatDate, getInitials } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import TaskDetailModal from '@/components/tasks/task-detail-modal';
@@ -106,7 +107,7 @@ function KanbanColumn({ status, columnTasks, onTaskClick, onAddTask }: {
     onTaskClick: (task: Task) => void;
     onAddTask: () => void;
 }) {
-    const { moveTask } = useApp();
+    const moveTaskMutation = useMoveTask();
     const statusColor = TASK_STATUS_COLORS[status];
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -123,7 +124,7 @@ function KanbanColumn({ status, columnTasks, onTaskClick, onAddTask }: {
         e.currentTarget.classList.remove('bg-brand-50/50');
         const taskId = e.dataTransfer.getData('text/plain');
         if (taskId) {
-            moveTask(taskId, status);
+            moveTaskMutation.mutate({ taskId, status });
         }
     };
 
@@ -194,15 +195,18 @@ function KanbanColumn({ status, columnTasks, onTaskClick, onAddTask }: {
 }
 
 export default function TaskBoardPage() {
-    const { state } = useApp();
+    const { profile } = useAuth();
+    const { data: tasks } = useTasks();
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
     const [searchQuery, setSearchQuery] = useState('');
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
 
-    const allTasks = getVisibleTasksForUser(state.tasks, state.currentUser);
-    const canCreate = canCreateTask(state.currentUser);
+    if (!profile) return null;
+
+    const allTasks = getVisibleTasksForUser(tasks ?? [], profile);
+    const canCreate = canCreateTask(profile);
     const overdueTasks = allTasks.filter(t => t.status !== 'done' && isOverdue(t.due_date));
 
     const filteredTasks = allTasks.filter(task => {
@@ -224,15 +228,15 @@ export default function TaskBoardPage() {
         setIsFormOpen(true);
     };
 
-    // When a task is selected, get a fresh version from the store
+    // When a task is selected, get a fresh version from the query data
     const handleTaskClick = (task: Task) => {
-        const freshTask = state.tasks.find(t => t.id === task.id);
+        const freshTask = (tasks ?? []).find(t => t.id === task.id);
         setSelectedTask(freshTask || task);
     };
 
-    // Re-sync selected task if store changes (e.g. after comment added)
+    // Re-sync selected task if query data changes (e.g. after comment added)
     const currentSelectedTask = selectedTask
-        ? state.tasks.find(t => t.id === selectedTask.id) || null
+        ? (tasks ?? []).find(t => t.id === selectedTask.id) || null
         : null;
 
     return (

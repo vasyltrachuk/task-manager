@@ -13,14 +13,15 @@ import {
     BarChart3,
     Settings,
     Plug,
-    ChevronDown,
-    Check,
+    LogOut,
     PanelLeftOpen,
     PanelLeftClose,
 } from 'lucide-react';
 import { cn, getInitials } from '@/lib/utils';
 import { USER_ROLE_LABELS } from '@/lib/types';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
+import { useTasks } from '@/lib/hooks/use-tasks';
+import { useProfiles } from '@/lib/hooks/use-profiles';
 import { isAdmin, getVisibleTasksForUser } from '@/lib/rbac';
 
 interface NavItem {
@@ -92,39 +93,35 @@ function SidebarTooltip({
 
 export default function Sidebar() {
     const pathname = usePathname();
-    const { state, setCurrentUser } = useApp();
+    const { profile, signOut } = useAuth();
+    const { data: tasks } = useTasks();
+    const { data: profiles } = useProfiles();
     const [isExpanded, setIsExpanded] = useState(false);
-    const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const tooltipRef = useRef<HTMLDivElement>(null);
     const [tooltip, setTooltip] = useState<Tooltip>({
         label: '',
         variant: 'default',
         visible: false,
     });
-    const currentUser = state.currentUser;
-    const isCurrentUserAdmin = isAdmin(currentUser);
+
+    if (!profile) return null;
+
+    const isCurrentUserAdmin = isAdmin(profile!);
 
     const navItems = useMemo(() => {
         const base = isCurrentUserAdmin ? adminNavItems : accountantNavItems;
         if (isCurrentUserAdmin) return base;
-        const todoCount = getVisibleTasksForUser(state.tasks, currentUser)
+        const todoCount = getVisibleTasksForUser(tasks ?? [], profile!)
             .filter(t => t.status === 'todo').length;
         if (todoCount === 0) return base;
         return base.map(item =>
             item.href === '/tasks' ? { ...item, badge: todoCount } : item
         );
-    }, [isCurrentUserAdmin, state.tasks, currentUser]);
+    }, [isCurrentUserAdmin, tasks, profile]);
     const settingsItems = isCurrentUserAdmin ? adminSettingsItems : accountantSettingsItems;
-    const switchableProfiles = useMemo(
-        () => state.profiles.filter((profile) =>
-            profile.is_active && (profile.role === 'admin' || profile.role === 'accountant')
-        ),
-        [state.profiles]
-    );
 
     const collapse = useCallback(() => {
         setIsExpanded(false);
-        setIsUserMenuOpen(false);
     }, []);
 
     // Close on Escape
@@ -239,56 +236,32 @@ export default function Sidebar() {
                 </nav>
 
                 {/* User Profile */}
-                <div className="px-2 py-3 border-t border-surface-200 relative">
-                    <button
-                        onClick={() => {
-                            if (!isExpanded) {
-                                setIsExpanded(true);
-                                setIsUserMenuOpen(true);
-                            } else {
-                                setIsUserMenuOpen(prev => !prev);
-                            }
-                        }}
-                        className="flex items-center gap-3 w-full px-2 py-2 rounded-lg hover:bg-surface-100 transition-colors"
-                        onPointerEnter={(e) => showTooltip(e, currentUser.full_name)}
+                <div className="px-2 py-3 border-t border-surface-200">
+                    <div
+                        className="flex items-center gap-3 w-full px-2 py-2 rounded-lg"
+                        onPointerEnter={(e) => showTooltip(e, profile.full_name)}
                         onPointerLeave={hideTooltip}
                     >
                         <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 text-sm font-semibold flex-shrink-0">
-                            {getInitials(currentUser.full_name)}
+                            {getInitials(profile.full_name)}
                         </div>
                         {isExpanded && (
                             <>
                                 <div className="flex-1 text-left min-w-0">
-                                    <div className="text-sm font-semibold text-text-primary truncate">{currentUser.full_name}</div>
-                                    <div className="text-[11px] text-text-muted capitalize">{USER_ROLE_LABELS[currentUser.role]}</div>
+                                    <div className="text-sm font-semibold text-text-primary truncate">{profile.full_name}</div>
+                                    <div className="text-[11px] text-text-muted capitalize">{USER_ROLE_LABELS[profile.role]}</div>
                                 </div>
-                                <ChevronDown size={14} className="text-text-muted" />
+                                <button
+                                    onClick={signOut}
+                                    className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-100 transition-colors flex-shrink-0"
+                                    aria-label="Вийти"
+                                    title="Вийти"
+                                >
+                                    <LogOut size={16} className="text-text-muted" />
+                                </button>
                             </>
                         )}
-                    </button>
-
-                    {isUserMenuOpen && isExpanded && (
-                        <div className="absolute bottom-[72px] left-2 right-2 bg-white border border-surface-200 rounded-xl shadow-lg py-1.5 z-50">
-                            {switchableProfiles.map((profile) => (
-                                <button
-                                    key={profile.id}
-                                    onClick={() => {
-                                        setCurrentUser(profile.id);
-                                        setIsUserMenuOpen(false);
-                                    }}
-                                    className={cn(
-                                        'w-full px-3 py-2.5 text-left text-sm transition-colors flex items-center justify-between gap-2',
-                                        profile.id === currentUser.id
-                                            ? 'bg-brand-50 text-brand-700'
-                                            : 'text-text-primary hover:bg-surface-50'
-                                    )}
-                                >
-                                    <span className="truncate">{profile.full_name} ({USER_ROLE_LABELS[profile.role]})</span>
-                                    {profile.id === currentUser.id && <Check size={14} />}
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                    </div>
                 </div>
             </aside>
 

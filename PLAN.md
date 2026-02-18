@@ -1,6 +1,6 @@
 # План реалізації: Multi-tenant SaaS + White-label Telegram боти
 
-Оновлено: 2026-02-17
+Оновлено: 2026-02-18
 
 ## 1. Концепція і вхідні умови
 
@@ -11,6 +11,29 @@
   - Бухгалтер та адмін бачать чат з клієнтами у веб-дашборді.
   - Клієнт надсилає документи через бот — бухгалтер прикріпляє їх до задач.
 - **Поточний стан**: Next.js App Router з готовими UI-екранами (clients/tasks/team/billing/licenses/settings), дані — mock-store. Supabase залежності є, але не інтегровані.
+
+### 1.1 SaaS access lifecycle (обов'язково для prod)
+
+```text
+Checkout success (payment provider)
+  -> Webhook (signed, idempotent)
+    -> Provision tenant + owner membership
+    -> Upsert subscription state
+    -> Materialize entitlements
+User login
+  -> Auth session
+  -> Resolve tenant/profile
+  -> Check subscription status
+    -> active/trialing/grace: allow dashboard
+    -> otherwise: redirect to "subscription required"
+```
+
+- Provisioning виконується **тільки** на бекенді (service role), не з клієнта.
+- Webhook завжди ідемпотентний (`provider_event_id` унікальний).
+- Entitlements зберігаються окремо (`saas_entitlements`) і є джерелом truth для фіче-гейтінгу.
+- Доступ до workspace залежить не лише від auth, а й від `subscription.status`.
+- На pre-billing етапі (без checkout/домену/інфри) enforcement вимикається через `SAAS_ENFORCE_SUBSCRIPTIONS=false`.
+  Після запуску білінгу перемкнути на `SAAS_ENFORCE_SUBSCRIPTIONS=true`.
 
 ## 2. Архітектурний патерн: Tenant-first
 
@@ -197,7 +220,7 @@ CREATE TABLE clients (
   tenant_id       uuid NOT NULL REFERENCES tenants(id),
   name            text NOT NULL,
   type            text NOT NULL,                -- FOP | LLC | OSBB | NGO | GRANT
-  tax_id_type     text NOT NULL DEFAULT 'ipn',  -- ipn | edrpou
+  tax_id_type     text NOT NULL DEFAULT 'rnokpp',  -- rnokpp | edrpou
   tax_id          text NOT NULL,
   status          text NOT NULL DEFAULT 'onboarding',
   tax_system      text,

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { KeyRound, RefreshCw, Save, ShieldAlert, Trash2 } from 'lucide-react';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
 import { canAccessIntegrations } from '@/lib/rbac';
 import { cn, formatDate } from '@/lib/utils';
 
@@ -41,7 +41,7 @@ function getRunStatusLabel(status: string): string {
 }
 
 export default function IntegrationsSettingsPage() {
-    const { state } = useApp();
+    const { profile } = useAuth();
     const [tokenInput, setTokenInput] = useState('');
     const [tokenStatus, setTokenStatus] = useState<DpsTokenStatus | null>(null);
     const [recentRuns, setRecentRuns] = useState<DpsRun[]>([]);
@@ -51,7 +51,11 @@ export default function IntegrationsSettingsPage() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-    const canAccess = canAccessIntegrations(state.currentUser);
+    if (!profile) {
+        return null;
+    }
+
+    const canAccess = canAccessIntegrations(profile!);
 
     const loadData = useCallback(async () => {
         try {

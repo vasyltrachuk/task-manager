@@ -1,10 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isSaasSubscriptionEnforced } from '@/lib/server/saas/gating';
+import { isActiveSaasSubscriptionStatus } from '@/lib/server/saas/subscription';
 
 export interface TenantContext {
   tenantId: string;
   userId?: string;
   botId?: string;
   userRole?: string;
+  subscriptionStatus?: string;
 }
 
 /**
@@ -33,10 +36,37 @@ export async function buildTenantContextFromSession(
     throw new Error('PROFILE_NOT_FOUND');
   }
 
+  if (!isSaasSubscriptionEnforced()) {
+    return {
+      tenantId: profile.tenant_id,
+      userId: user.id,
+      userRole: profile.role,
+    };
+  }
+
+  const { data: subscription, error: subscriptionError } = await supabase
+    .from('saas_subscriptions')
+    .select('status')
+    .eq('tenant_id', profile.tenant_id)
+    .maybeSingle();
+
+  const missingSaasTable =
+    subscriptionError?.code === 'PGRST205' ||
+    Boolean(subscriptionError?.message?.includes('Could not find the table'));
+
+  if (subscriptionError && !missingSaasTable) {
+    throw new Error('SUBSCRIPTION_LOOKUP_FAILED');
+  }
+
+  if (subscription && !isActiveSaasSubscriptionStatus(subscription.status)) {
+    throw new Error('SUBSCRIPTION_INACTIVE');
+  }
+
   return {
     tenantId: profile.tenant_id,
     userId: user.id,
     userRole: profile.role,
+    subscriptionStatus: subscription?.status,
   };
 }
 

@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Search, Plus, Users, Pencil, Archive, ShieldCheck } from 'lucide-react';
 import { Client, CLIENT_TAX_ID_TYPE_LABELS, Profile } from '@/lib/types';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
 import { cn, getInitials, formatMoneyUAH } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import { getTaxSystemLabel, isSingleTaxSystem, isVatPayerByTaxSystem } from '@/lib/tax';
@@ -12,6 +12,9 @@ import { calculateClientBillingSnapshot, formatMinorMoneyUAH, normalizeInvoiceSt
 import ClientFormModal from '@/components/clients/client-form-modal';
 import TaskFormModal from '@/components/tasks/task-form-modal';
 import { canCreateTask, canManageClients, canViewClient, getVisibleClientsForUser } from '@/lib/rbac';
+import { useClients, useArchiveClient } from '@/lib/hooks/use-clients';
+import { useLicenses } from '@/lib/hooks/use-licenses';
+import { useInvoices, usePayments } from '@/lib/hooks/use-billing';
 
 type FilterTab = 'all' | 'fop' | 'llc' | 'vat' | 'onboarding';
 
@@ -223,7 +226,6 @@ function ClientCard({
                 {client.accountants && client.accountants.length > 0 && (() => {
                     const iAmHere = client.accountants.some(a => a.id === currentUserId);
                     const othersCount = client.accountants.length - (iAmHere ? 1 : 0);
-                    const otherNames = client.accountants.filter(a => a.id !== currentUserId).map(a => a.full_name);
                     const tooltipText = client.accountants.map(a => a.id === currentUserId ? 'Ви' : a.full_name).join(', ');
 
                     return (
@@ -288,7 +290,12 @@ function ClientCard({
 }
 
 function ClientsPageContent() {
-    const { state, archiveClient } = useApp();
+    const { profile } = useAuth();
+    const { data: clientsData } = useClients();
+    const { data: licensesData } = useLicenses();
+    const { data: invoicesData } = useInvoices();
+    const { data: paymentsData } = usePayments();
+    const archiveClientMutation = useArchiveClient();
     const router = useRouter();
     const searchParams = useSearchParams();
     const [activeFilter, setActiveFilter] = useState<FilterTab>(() => parseFilterTab(searchParams.get('filter')));
@@ -297,11 +304,11 @@ function ClientsPageContent() {
     const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
     const [taskClientId, setTaskClientId] = useState<string | null>(null);
     const [editingClient, setEditingClient] = useState<Client | null>(null);
-    const canQuickCreateTask = canCreateTask(state.currentUser);
-    const canManageClient = canManageClients(state.currentUser);
+    const canQuickCreateTask = profile ? canCreateTask(profile) : false;
+    const canManageClient = profile ? canManageClients(profile) : false;
 
     const licenseStatsByClient = useMemo<Record<string, ClientLicenseStats>>(() => {
-        return state.licenses.reduce<Record<string, ClientLicenseStats>>((acc, license) => {
+        return (licensesData ?? []).reduce<Record<string, ClientLicenseStats>>((acc, license) => {
             const existing = acc[license.client_id] || { total: 0, critical: 0 };
             existing.total += 1;
             if (isLicenseCritical(license)) {
@@ -310,16 +317,16 @@ function ClientsPageContent() {
             acc[license.client_id] = existing;
             return acc;
         }, {});
-    }, [state.licenses]);
+    }, [licensesData]);
 
-    const visibleClients = useMemo(
-        () => getVisibleClientsForUser(state.clients, state.currentUser),
-        [state.clients, state.currentUser]
-    );
+    const visibleClients = useMemo(() => {
+        if (!profile) return [];
+        return getVisibleClientsForUser(clientsData ?? [], profile);
+    }, [clientsData, profile]);
 
     const normalizedInvoices = useMemo(
-        () => state.invoices.map((invoice) => normalizeInvoiceStatus(invoice)),
-        [state.invoices]
+        () => (invoicesData ?? []).map((invoice) => normalizeInvoiceStatus(invoice)),
+        [invoicesData]
     );
 
     const billingStatsByClient = useMemo<Record<string, ClientBillingStats>>(() => {
@@ -327,11 +334,11 @@ function ClientsPageContent() {
             acc[client.id] = calculateClientBillingSnapshot(
                 client.id,
                 normalizedInvoices,
-                state.payments
+                paymentsData ?? []
             );
             return acc;
         }, {});
-    }, [normalizedInvoices, state.payments, visibleClients]);
+    }, [normalizedInvoices, paymentsData, visibleClients]);
 
     const allClients = visibleClients.filter(c => c.status !== 'archived');
 
@@ -396,7 +403,8 @@ function ClientsPageContent() {
     };
 
     const handleOpenDetails = (client: Client) => {
-        if (!canViewClient(state.currentUser, client)) return;
+        if (!profile) return;
+        if (!canViewClient(profile, client)) return;
 
         window.sessionStorage.setItem(CLIENTS_SCROLL_Y_SESSION_KEY, String(window.scrollY));
 
@@ -416,7 +424,7 @@ function ClientsPageContent() {
     const handleArchive = (clientId: string) => {
         if (!canManageClient) return;
         if (confirm('Архівувати цього клієнта?')) {
-            archiveClient(clientId);
+            archiveClientMutation.mutate(clientId);
         }
     };
 
@@ -424,6 +432,8 @@ function ClientsPageContent() {
         setTaskClientId(client.id);
         setIsTaskFormOpen(true);
     };
+
+    if (!profile) return null;
 
     return (
         <div className="p-6">
@@ -496,7 +506,7 @@ function ClientsPageContent() {
                             key={client.id}
                             client={client}
                             licenseStats={licenseStatsByClient[client.id] || { total: 0, critical: 0 }}
-                            currentUserId={state.currentUser.id}
+                            currentUserId={profile?.id || ''}
                             onOpen={handleOpenDetails}
                             onEdit={handleEdit}
                             onArchive={handleArchive}
@@ -590,7 +600,7 @@ function ClientsPageContent() {
                                         </td>
                                         <td className="px-5 py-3.5">
                                             {client.accountants && client.accountants.length > 0 ? (() => {
-                                                const isMe = (acc: Profile) => acc.id === state.currentUser.id;
+                                                const isMe = (acc: Profile) => acc.id === (profile?.id || '');
                                                 const iAmHere = client.accountants.some(isMe);
                                                 const othersCount = client.accountants.length - (iAmHere ? 1 : 0);
                                                 const tooltipText = client.accountants.map(a => isMe(a) ? 'Ви' : a.full_name).join(', ');

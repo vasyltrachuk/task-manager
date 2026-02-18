@@ -15,10 +15,13 @@ import {
     RECURRENCE_LABELS,
     USER_ROLE_LABELS,
 } from '@/lib/types';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import { getVisibleClientsForUser, isAccountant, isAdmin } from '@/lib/rbac';
+import { useClients } from '@/lib/hooks/use-clients';
+import { useProfiles } from '@/lib/hooks/use-profiles';
+import { useCreateTask, useUpdateTask } from '@/lib/hooks/use-tasks';
 
 interface TaskFormModalProps {
     isOpen: boolean;
@@ -61,7 +64,7 @@ function getInitialFormData(
             type: editTask.type,
             status: editTask.status,
             priority: editTask.priority,
-            due_date: editTask.due_date ? editTask.due_date.slice(0, 16) : '',
+            due_date: editTask.due_date ? editTask.due_date.slice(0, 10) : '',
             recurrence: editTask.recurrence,
             recurrence_days: editTask.recurrence === 'semi_monthly'
                 ? (editTask.recurrence_days?.length === 2 ? editTask.recurrence_days : [1, 15])
@@ -90,17 +93,23 @@ function getInitialFormData(
 }
 
 export default function TaskFormModal({ isOpen, onClose, editTask, defaultClientId }: TaskFormModalProps) {
-    const { state, addTask, updateTask } = useApp();
-    const isAdminUser = isAdmin(state.currentUser);
-    const isAccountantUser = isAccountant(state.currentUser);
+    const { profile } = useAuth();
+    const { data: clientsData } = useClients();
+    const { data: profilesData } = useProfiles();
+    const createTaskMutation = useCreateTask();
+    const updateTaskMutation = useUpdateTask();
+    const clients = useMemo(() => clientsData ?? [], [clientsData]);
+    const profiles = useMemo(() => profilesData ?? [], [profilesData]);
+    const isAdminUser = profile ? isAdmin(profile) : false;
+    const isAccountantUser = profile ? isAccountant(profile) : false;
 
     const resolveDefaultAssigneeForClient = (clientId: string): string => {
-        const client = state.clients.find((item) => item.id === clientId);
+        const client = clients.find((item) => item.id === clientId);
         if (!client?.accountants?.length) return '';
 
         const responsible = client.accountants.find((accountant) =>
-            state.profiles.some((profile) =>
-                profile.id === accountant.id && profile.role === 'accountant' && profile.is_active
+            profiles.some((row) =>
+                row.id === accountant.id && row.role === 'accountant' && row.is_active
             )
         );
 
@@ -109,7 +118,7 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
 
     const initialAssigneeId = editTask?.assignee_id
         || (isAccountantUser
-            ? state.currentUser.id
+            ? (profile?.id ?? '')
             : (isAdminUser && defaultClientId ? resolveDefaultAssigneeForClient(defaultClientId) : ''));
 
     const [formData, setFormData] = useState<TaskFormData>(() =>
@@ -131,28 +140,31 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
     const normalizedAssigneeQuery = assigneeSearchQuery.trim().toLowerCase();
 
     const activeClients = useMemo(() => {
-        return getVisibleClientsForUser(state.clients, state.currentUser)
+        if (!profile) return [];
+        return getVisibleClientsForUser(clients, profile)
             .filter(c => c.status !== 'archived')
             .sort((a, b) => getClientDisplayName(a).localeCompare(getClientDisplayName(b), 'uk', { sensitivity: 'base' }));
-    }, [state.clients, state.currentUser]);
+    }, [clients, profile]);
 
     const assignees = useMemo(() => {
+        if (!profile) return [];
+
         if (isAdminUser) {
-            return state.profiles
+            return profiles
                 .filter(profile => profile.role === 'accountant' && profile.is_active)
                 .sort((a, b) => a.full_name.localeCompare(b.full_name, 'uk', { sensitivity: 'base' }));
         }
 
         if (isAccountantUser) {
-            return state.profiles
-                .filter(profile => profile.id === state.currentUser.id && profile.is_active)
+            return profiles
+                .filter(row => row.id === profile.id && row.is_active)
                 .sort((a, b) => a.full_name.localeCompare(b.full_name, 'uk', { sensitivity: 'base' }));
         }
 
-        return state.profiles
+        return profiles
             .filter(() => false)
             .sort((a, b) => a.full_name.localeCompare(b.full_name, 'uk', { sensitivity: 'base' }));
-    }, [isAccountantUser, isAdminUser, state.currentUser.id, state.profiles]);
+    }, [isAccountantUser, isAdminUser, profile, profiles]);
 
     const selectedClient = useMemo(
         () => activeClients.find(c => c.id === formData.client_id),
@@ -196,17 +208,17 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
     const isAdminCreatingTask = !editTask && isAdminUser;
 
     const getDefaultAssigneeForClient = useCallback((clientId: string): string => {
-        const client = state.clients.find((c) => c.id === clientId);
+        const client = clients.find((c) => c.id === clientId);
         if (!client?.accountants?.length) return '';
 
         const firstResponsible = client.accountants.find((accountant) =>
-            state.profiles.some((profile) =>
-                profile.id === accountant.id && profile.role === 'accountant' && profile.is_active
+            profiles.some((row) =>
+                row.id === accountant.id && row.role === 'accountant' && row.is_active
             )
         );
 
         return firstResponsible?.id || '';
-    }, [state.clients, state.profiles]);
+    }, [clients, profiles]);
 
     useEffect(() => {
         if (!isClientDropdownOpen) return;
@@ -252,7 +264,7 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
         const nextAssigneeId = isAdminCreatingTask
             ? getDefaultAssigneeForClient(clientId)
             : isAccountantUser
-                ? state.currentUser.id
+                ? (profile?.id ?? '')
                 : undefined;
 
         setFormData((prev) => ({
@@ -345,9 +357,13 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
     };
 
     const handleSubmit = () => {
+        if (!profile) return;
         if (!validate()) return;
 
-        const resolvedAssigneeId = isAccountantUser ? state.currentUser.id : formData.assignee_id;
+        const resolvedAssigneeId = isAccountantUser ? profile.id : formData.assignee_id;
+        const dueDate = formData.due_date.includes('T')
+            ? formData.due_date.slice(0, 10)
+            : formData.due_date;
 
         const taskData = {
             title: formData.title.trim(),
@@ -357,35 +373,27 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
             type: formData.type,
             status: formData.status,
             priority: formData.priority,
-            due_date: new Date(formData.due_date).toISOString(),
+            due_date: dueDate,
             recurrence: formData.recurrence,
-            recurrence_days: formData.recurrence === 'semi_monthly' ? formData.recurrence_days : undefined,
+            recurrence_days: formData.recurrence === 'semi_monthly' ? formData.recurrence_days : [],
             period: formData.period || undefined,
             proof_required: formData.proof_required,
-            subtasks: formData.subtasks.map((title, i) => ({
-                id: `st-new-${i}`,
-                task_id: '',
-                title,
-                is_completed: false,
-                sort_order: i,
-            })),
-            comments: editTask?.comments || [],
-            files: editTask?.files || [],
+            subtasks: formData.subtasks,
         };
 
         if (editTask) {
-            updateTask({
-                ...editTask,
+            updateTaskMutation.mutate({
+                id: editTask.id,
                 ...taskData,
-                updated_at: new Date().toISOString(),
-            } as Task);
+            });
         } else {
-            addTask(taskData as Omit<Task, 'id' | 'created_at' | 'updated_at' | 'created_by'>);
+            createTaskMutation.mutate(taskData);
         }
         onClose();
     };
 
     if (!isOpen) return null;
+    if (!profile) return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -705,7 +713,7 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
                                     {isRecurring ? 'Найближчий дедлайн *' : 'Дедлайн *'}
                                 </label>
                                 <input
-                                    type="datetime-local"
+                                    type="date"
                                     value={formData.due_date}
                                     onChange={(e) => setFormData(prev => ({ ...prev, due_date: e.target.value }))}
                                     className={cn(

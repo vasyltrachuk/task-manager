@@ -21,7 +21,11 @@ import {
     LICENSE_STATUS_COLORS,
     LICENSE_CHECK_RESULT_LABELS,
 } from '@/lib/types';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
+import { useLicenses, useDeleteLicense } from '@/lib/hooks/use-licenses';
+import { useClients } from '@/lib/hooks/use-clients';
+import { useProfiles } from '@/lib/hooks/use-profiles';
+import { useCreateTask } from '@/lib/hooks/use-tasks';
 import { cn, formatDate, getInitials } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import ViewModeToggle from '@/components/ui/view-mode-toggle';
@@ -249,8 +253,12 @@ function LicenseCard({
 }
 
 export default function LicensesPage() {
-    const { state, deleteLicense, addTask } = useApp();
-    const canManage = canManageLicenses(state.currentUser);
+    const { profile } = useAuth();
+    const { data: licenses } = useLicenses();
+    const { data: clients } = useClients();
+    const { data: profiles } = useProfiles();
+    const deleteLicenseMutation = useDeleteLicense();
+    const createTaskMutation = useCreateTask();
 
     const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
     const [searchQuery, setSearchQuery] = useState('');
@@ -258,13 +266,17 @@ export default function LicensesPage() {
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingLicense, setEditingLicense] = useState<License | null>(null);
 
+    if (!profile) return null;
+
+    const canManage = canManageLicenses(profile!);
+
     const licenseRows = useMemo(() => {
-        return state.licenses.map((license) => ({
+        return (licenses ?? []).map((license) => ({
             ...license,
-            client: state.clients.find(c => c.id === license.client_id),
-            responsible: state.profiles.find(p => p.id === license.responsible_id),
+            client: (clients ?? []).find(c => c.id === license.client_id),
+            responsible: (profiles ?? []).find(p => p.id === license.responsible_id),
         }));
-    }, [state.clients, state.licenses, state.profiles]);
+    }, [clients, licenses, profiles]);
 
     const filteredLicenses = licenseRows.filter((license) => {
         if (searchQuery) {
@@ -335,7 +347,7 @@ export default function LicensesPage() {
 
     const handleDelete = (licenseId: string) => {
         if (confirm('Видалити цю ліцензію?')) {
-            deleteLicense(licenseId);
+            deleteLicenseMutation.mutate(licenseId);
         }
     };
 
@@ -345,7 +357,7 @@ export default function LicensesPage() {
         const dueDate = nextAction.date || license.next_check_due || license.next_payment_due || license.valid_to || license.updated_at;
         const priority = getTaskPriority(license);
 
-        addTask({
+        createTaskMutation.mutateAsync({
             title: `Контроль ліцензії: ${LICENSE_TYPE_LABELS[license.type]}`,
             description: [
                 `Клієнт: ${license.client ? getClientDisplayName(license.client) : '—'}`,
@@ -362,11 +374,8 @@ export default function LicensesPage() {
             priority,
             recurrence: 'none',
             period: undefined,
-            recurrence_days: undefined,
             proof_required: true,
             subtasks: [],
-            comments: [],
-            files: [],
         });
 
         alert('Завдання контролю створено у розділі "Завдання".');

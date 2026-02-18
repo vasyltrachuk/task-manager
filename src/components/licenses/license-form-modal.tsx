@@ -13,9 +13,12 @@ import {
     LICENSE_PAYMENT_FREQUENCY_LABELS,
     LICENSE_CHECK_RESULT_LABELS,
 } from '@/lib/types';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 import { canManageLicenses } from '@/lib/rbac';
+import { useClients } from '@/lib/hooks/use-clients';
+import { useProfiles } from '@/lib/hooks/use-profiles';
+import { useCreateLicense, useUpdateLicense } from '@/lib/hooks/use-licenses';
 
 interface LicenseFormModalProps {
     isOpen: boolean;
@@ -110,11 +113,16 @@ export default function LicenseFormModal({
     defaultClientId,
     defaultResponsibleId,
 }: LicenseFormModalProps) {
-    const { state, addLicense, updateLicense } = useApp();
-    const canManage = canManageLicenses(state.currentUser);
+    const { profile } = useAuth();
+    const { data: clientsData } = useClients();
+    const { data: profilesData } = useProfiles();
+    const createLicenseMutation = useCreateLicense();
+    const updateLicenseMutation = useUpdateLicense();
 
-    const activeClients = state.clients.filter(c => c.status !== 'archived');
-    const responsibleCandidates = state.profiles.filter(p => p.role === 'accountant' && p.is_active);
+    const canManage = profile ? canManageLicenses(profile) : false;
+
+    const activeClients = (clientsData ?? []).filter(c => c.status !== 'archived');
+    const responsibleCandidates = (profilesData ?? []).filter(p => p.role === 'accountant' && p.is_active);
 
     const [formData, setFormData] = useState<LicenseFormData>(() =>
         getInitialFormData(editLicense, defaultClientId, defaultResponsibleId)
@@ -167,24 +175,22 @@ export default function LicenseFormModal({
             last_checked_at: toIsoDate(formData.last_checked_at),
             last_check_result: formData.last_check_result,
             notes: formData.notes.trim() || undefined,
-            client: state.clients.find(c => c.id === formData.client_id),
-            responsible: state.profiles.find(p => p.id === formData.responsible_id),
         };
 
         if (editLicense) {
-            updateLicense({
-                ...editLicense,
+            updateLicenseMutation.mutate({
                 ...licenseData,
-                updated_at: new Date().toISOString(),
-            } as License);
+                id: editLicense.id,
+            });
         } else {
-            addLicense(licenseData as Omit<License, 'id' | 'created_at' | 'updated_at'>);
+            createLicenseMutation.mutate(licenseData);
         }
 
         onClose();
     };
 
     if (!isOpen) return null;
+    if (!profile) return null;
     if (!canManage) return null;
 
     return (

@@ -8,7 +8,7 @@ function createClient(overrides: Partial<Client> = {}): Client {
         id: 'c-test',
         name: 'Test Client',
         type: 'FOP',
-        tax_id_type: 'ipn',
+        tax_id_type: 'rnokpp',
         tax_id: '1234567890',
         status: 'active',
         tax_system: 'single_tax_group2',

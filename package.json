@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed:dev": "npx tsx supabase/seed-dev.ts",
+    "clean:team-data": "node scripts/clear-admin-accountant-data.mjs",
+    "clean:all-data": "node scripts/clear-supabase-all-data.mjs",
+    "check:supabase-clean": "node scripts/check-supabase-cleanliness.mjs"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

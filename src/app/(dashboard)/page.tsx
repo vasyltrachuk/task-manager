@@ -12,29 +12,44 @@ import {
     ShieldCheck,
     Wallet,
 } from 'lucide-react';
-import { useApp } from '@/lib/store';
 import { TASK_TYPE_LABELS, TASK_TYPE_COLORS } from '@/lib/types';
 import { cn, isOverdue, formatDate, getInitials } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import Link from 'next/link';
 import { getVisibleClientsForUser, getVisibleTasksForUser, isAdmin } from '@/lib/rbac';
 import { calculateBillingSnapshot, formatMinorMoneyUAH, normalizeInvoiceStatus } from '@/lib/billing';
+import { useAuth } from '@/lib/auth-context';
+import { useTasks } from '@/lib/hooks/use-tasks';
+import { useClients } from '@/lib/hooks/use-clients';
+import { useInvoices, usePayments } from '@/lib/hooks/use-billing';
+import { useLicenses } from '@/lib/hooks/use-licenses';
+import { useProfiles } from '@/lib/hooks/use-profiles';
 
 export default function DashboardPage() {
-    const { state } = useApp();
-    const isAdminUser = isAdmin(state.currentUser);
-    const tasks = getVisibleTasksForUser(state.tasks, state.currentUser);
-    const clients = getVisibleClientsForUser(state.clients, state.currentUser);
+    const { profile } = useAuth();
+    const { data: tasksData } = useTasks();
+    const { data: clientsData } = useClients();
+    const { data: invoicesData } = useInvoices();
+    const { data: paymentsData } = usePayments();
+    const { data: licensesData } = useLicenses();
+    const { data: profilesData } = useProfiles();
+
+    if (!profile) return null;
+
+    const isAdminUser = isAdmin(profile);
+    const tasks = getVisibleTasksForUser(tasksData ?? [], profile);
+    const clients = getVisibleClientsForUser(clientsData ?? [], profile);
     const visibleClientIds = new Set(clients.map((client) => client.id));
-    const invoices = state.invoices
+    const invoices = (invoicesData ?? [])
         .filter((invoice) => visibleClientIds.has(invoice.client_id))
         .map((invoice) => normalizeInvoiceStatus(invoice));
-    const payments = state.payments.filter((payment) => visibleClientIds.has(payment.client_id));
+    const payments = (paymentsData ?? []).filter((payment) => visibleClientIds.has(payment.client_id));
     const billingSnapshot = calculateBillingSnapshot(invoices, payments);
-    const licenses = isAdminUser ? state.licenses : [];
+    const licenses = isAdminUser ? (licensesData ?? []) : [];
+    const profiles = profilesData ?? [];
     const accountants = isAdminUser
-        ? state.profiles.filter(p => p.role === 'accountant')
-        : state.profiles.filter(p => p.id === state.currentUser.id && p.role === 'accountant');
+        ? profiles.filter(p => p.role === 'accountant')
+        : profiles.filter(p => p.id === profile.id && p.role === 'accountant');
     const overdueTasks = tasks.filter(t => t.status !== 'done' && isOverdue(t.due_date));
     const activeTasks = tasks.filter(t => t.status !== 'done');
     const completedTasks = tasks.filter(t => t.status === 'done');

@@ -25,10 +25,17 @@ import {
     PRIORITY_LABELS,
     RECURRENCE_LABELS,
 } from '@/lib/types';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
 import { cn, formatDate, formatTime, getInitials } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import { canOperateTask, isAdmin } from '@/lib/rbac';
+import { useActivityLogByTask } from '@/lib/hooks/use-activity-log';
+import {
+    useAddComment,
+    useDeleteTask,
+    useMoveTask,
+    useToggleSubtask,
+} from '@/lib/hooks/use-tasks';
 
 interface TaskDetailModalProps {
     task: Task;
@@ -44,14 +51,20 @@ const STATUS_FLOW: Record<string, { next: TaskStatus; label: string }> = {
 };
 
 export default function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
-    const { state, addComment, toggleSubtask, moveTask, deleteTask, logActivity } = useApp();
+    const { profile } = useAuth();
+    const { data: taskActivities } = useActivityLogByTask(task.id);
+    const addCommentMutation = useAddComment();
+    const toggleSubtaskMutation = useToggleSubtask();
+    const moveTaskMutation = useMoveTask();
+    const deleteTaskMutation = useDeleteTask();
     const [noteText, setNoteText] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
+
+    if (!profile) return null;
 
     const completedSubtasks = task.subtasks?.filter(s => s.is_completed).length ?? 0;
     const totalSubtasks = task.subtasks?.length ?? 0;
 
-    const taskActivities = state.activityLog.filter(a => a.task_id === task.id);
     const statusColor = TASK_STATUS_COLORS[task.status];
     const typeColor = TASK_TYPE_COLORS[task.type];
 
@@ -63,8 +76,8 @@ export default function TaskDetailModal({ task, onClose }: TaskDetailModalProps)
     const recurrenceDays = task.recurrence === 'semi_monthly' && task.recurrence_days?.length === 2
         ? ` (${task.recurrence_days[0]} і ${task.recurrence_days[1]} числа)`
         : '';
-    const canOperate = canOperateTask(state.currentUser, task);
-    const canDelete = isAdmin(state.currentUser);
+    const canOperate = canOperateTask(profile, task);
+    const canDelete = isAdmin(profile);
 
     if (!canOperate) {
         return null;
@@ -72,26 +85,24 @@ export default function TaskDetailModal({ task, onClose }: TaskDetailModalProps)
 
     const handleAddComment = () => {
         if (!noteText.trim()) return;
-        addComment(task.id, noteText.trim());
+        addCommentMutation.mutate({ taskId: task.id, body: noteText.trim() });
         setNoteText('');
     };
 
     const handleToggleSubtask = (subtaskId: string) => {
-        toggleSubtask(task.id, subtaskId);
+        toggleSubtaskMutation.mutate({ taskId: task.id, subtaskId });
     };
 
     const handleMoveStatus = (newStatus: TaskStatus) => {
-        moveTask(task.id, newStatus);
-        logActivity(task.id, `Статус змінено на ${TASK_STATUS_LABELS[newStatus]}`);
+        moveTaskMutation.mutate({ taskId: task.id, status: newStatus });
     };
 
     const handleRequestClarification = () => {
-        moveTask(task.id, 'clarification');
-        logActivity(task.id, 'Завдання переведено на уточнення');
+        moveTaskMutation.mutate({ taskId: task.id, status: 'clarification' });
     };
 
     const handleDelete = () => {
-        deleteTask(task.id);
+        deleteTaskMutation.mutate(task.id);
         onClose();
     };
 
@@ -317,7 +328,7 @@ export default function TaskDetailModal({ task, onClose }: TaskDetailModalProps)
                                 </h3>
                                 <div className="space-y-0">
                                     {/* Activity entries */}
-                                    {taskActivities.map((activity) => (
+                                    {(taskActivities ?? []).map((activity) => (
                                         <div key={activity.id} className="activity-item">
                                             <div className="w-3 h-3 rounded-full bg-surface-300 flex-shrink-0 mt-1" />
                                             <div className="flex-1 min-w-0">

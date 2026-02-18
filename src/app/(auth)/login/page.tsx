@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { getSupabaseBrowserClient } from '@/lib/server/supabase-browser';
 
 export default function LoginPage() {
@@ -91,6 +92,12 @@ export default function LoginPage() {
             {loading ? 'Вхід...' : 'Увійти'}
           </button>
         </form>
+
+        <div className="mt-4 text-center">
+          <Link href="/auth/bootstrap" className="text-sm text-brand-600 hover:text-brand-700">
+            Перший запуск? Створити tenant
+          </Link>
+        </div>
       </div>
     </div>
   );

@@ -14,8 +14,8 @@ import {
     ShieldCheck,
 } from 'lucide-react';
 import { Profile } from '@/lib/types';
-import { useApp } from '@/lib/store';
 import { cn } from '@/lib/utils';
+import { useCreateProfile, useUpdateProfile } from '@/lib/hooks/use-profiles';
 
 interface AccountantFormModalProps {
     isOpen: boolean;
@@ -24,7 +24,8 @@ interface AccountantFormModalProps {
 }
 
 export default function AccountantFormModal({ isOpen, onClose, editProfile }: AccountantFormModalProps) {
-    const { addProfile, updateProfile } = useApp();
+    const createProfileMutation = useCreateProfile();
+    const updateProfileMutation = useUpdateProfile();
 
     const [fullName, setFullName] = useState(editProfile?.full_name || '');
     const [phone, setPhone] = useState(editProfile?.phone || '');
@@ -47,16 +48,17 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
         if (!fullName.trim()) errs.fullName = "Ім'я обов'язкове";
         if (!phone.trim()) errs.phone = "Телефон обов'язковий";
         else if (!/^\+380\d{9}$/.test(phone.replace(/\s/g, ''))) errs.phone = 'Формат: +380XXXXXXXXX';
+        if (!editProfile && !email.trim()) errs.email = "Email обов'язковий";
         if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.email = 'Невірний формат email';
         setErrors(errs);
         return Object.keys(errs).length === 0;
     };
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         if (!validate()) return;
 
         if (editProfile) {
-            updateProfile({
+            updateProfileMutation.mutate({
                 ...editProfile,
                 full_name: fullName.trim(),
                 phone: phone.trim(),
@@ -65,17 +67,21 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
             onClose();
         } else {
             const phoneToUse = phone.trim();
-            const result = addProfile({
-                full_name: fullName.trim(),
-                phone: phoneToUse,
-                email: email.trim() || undefined,
-            });
+            try {
+                const result = await createProfileMutation.mutateAsync({
+                    full_name: fullName.trim(),
+                    phone: phoneToUse,
+                    email: email.trim(),
+                });
 
-            setCreatedCredentials({
-                login: phoneToUse,
-                password: result.password,
-                name: fullName.trim(),
-            });
+                setCreatedCredentials({
+                    login: result.email || email.trim(),
+                    password: result.generated_password || '',
+                    name: fullName.trim(),
+                });
+            } catch {
+                // Validation and API errors are surfaced by mutation boundaries/logs.
+            }
         }
     };
 
@@ -159,7 +165,7 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                             {/* Login */}
                             <div>
                                 <label className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-2 block">
-                                    Логін (телефон)
+                                    Логін (email)
                                 </label>
                                 <div className="flex items-center gap-2">
                                     <div className="flex-1 px-4 py-3 bg-surface-50 border border-surface-200 rounded-xl text-sm font-mono font-semibold text-text-primary select-all">
@@ -256,7 +262,7 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                             <div>
                                 <label className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-2 flex items-center gap-1.5">
                                     <Phone size={12} />
-                                    Телефон (логін) *
+                                    Телефон *
                                 </label>
                                 <input
                                     type="tel"
@@ -275,7 +281,7 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                             <div>
                                 <label className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-2 flex items-center gap-1.5">
                                     <Mail size={12} />
-                                    Ел. пошта
+                                    Ел. пошта {!editProfile && '*'}
                                 </label>
                                 <input
                                     type="email"
@@ -297,7 +303,7 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                                     <div>
                                         <p className="text-xs font-semibold text-brand-800">Авто-генерація паролю</p>
                                         <p className="text-xs text-brand-600 mt-0.5">
-                                            Після створення система автоматично згенерує надійний пароль. Ви зможете скопіювати та передати його бухгалтеру.
+                                            Після створення система автоматично згенерує надійний пароль. Логіном для входу буде email бухгалтера.
                                         </p>
                                     </div>
                                 </div>

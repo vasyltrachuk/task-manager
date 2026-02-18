@@ -32,7 +32,7 @@ import {
     PAYMENT_STATUS_LABELS,
     PAYMENT_METHOD_LABELS,
 } from '@/lib/types';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
 import { cn, formatDate, getInitials, isOverdue, formatMoneyUAH } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import {
@@ -52,6 +52,8 @@ import {
     TAX_PROFILE_CADENCE_LABELS,
     TAX_PROFILE_RISK_FLAG_LABELS,
     TAX_PROFILE_SUBJECT_LABELS,
+    buildTaxProfile,
+    resolveObligations,
 } from '@/lib/tax-profile';
 import TaskFormModal from '@/components/tasks/task-form-modal';
 import LicenseFormModal from '@/components/licenses/license-form-modal';
@@ -63,6 +65,13 @@ import {
     getVisibleTasksForUser,
     isAccountant,
 } from '@/lib/rbac';
+import { useClient } from '@/lib/hooks/use-clients';
+import { useProfiles } from '@/lib/hooks/use-profiles';
+import { useLicensesByClient } from '@/lib/hooks/use-licenses';
+import { useTasksByClient, useCreateTask } from '@/lib/hooks/use-tasks';
+import { useInvoices, usePayments } from '@/lib/hooks/use-billing';
+import { useActivityLogByTasks } from '@/lib/hooks/use-activity-log';
+import { useTaxRulebook } from '@/lib/hooks/use-tax-rulebook';
 
 type TabKey = 'overview' | 'licenses' | 'billing' | 'tasks' | 'documents' | 'history';
 
@@ -123,19 +132,27 @@ function formatDaysLeft(daysLeft?: number): string {
 }
 
 export default function ClientProfilePage() {
-    const { state, addTask, getClientTaxProfile, getClientObligations } = useApp();
+    const { profile } = useAuth();
     const router = useRouter();
     const searchParams = useSearchParams();
     const params = useParams<{ id: string }>();
     const clientId = Array.isArray(params.id) ? params.id[0] : params.id;
+    const { data: client, isLoading: isClientLoading } = useClient(clientId);
+    const { data: profilesData } = useProfiles();
+    const { data: licensesData } = useLicensesByClient(clientId);
+    const { data: tasksData } = useTasksByClient(clientId);
+    const { data: invoicesData } = useInvoices();
+    const { data: paymentsData } = usePayments();
+    const { data: taxRulebook } = useTaxRulebook();
+    const createTaskMutation = useCreateTask();
 
     const [activeTab, setActiveTab] = useState<TabKey>('overview');
     const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
     const [isLicenseFormOpen, setIsLicenseFormOpen] = useState(false);
-    const canCreateTaskForUser = canCreateTask(state.currentUser);
-    const canManageLicense = canManageLicenses(state.currentUser);
 
-    const client = state.clients.find((c) => c.id === clientId);
+    const profiles = profilesData ?? [];
+    const canCreateTaskForUser = profile ? canCreateTask(profile) : false;
+    const canManageLicense = profile ? canManageLicenses(profile) : false;
     const backToClientsHref = useMemo(() => {
         const params = new URLSearchParams();
         const filter = searchParams.get('filter');
@@ -153,44 +170,35 @@ export default function ClientProfilePage() {
     const licenses = useMemo(() => {
         if (!canManageLicense) return [];
 
-        return state.licenses
-            .filter((license) => license.client_id === clientId)
-            .map((license) => ({
-                ...license,
-                responsible: state.profiles.find((profile) => profile.id === license.responsible_id),
-            }))
+        return [...(licensesData ?? [])]
             .sort((a, b) => (getNextLicenseAction(a).daysLeft ?? 9999) - (getNextLicenseAction(b).daysLeft ?? 9999));
-    }, [canManageLicense, clientId, state.licenses, state.profiles]);
+    }, [canManageLicense, licensesData]);
+
+    const visibleTasks = useMemo(() => {
+        if (!profile) return [];
+        return getVisibleTasksForUser(tasksData ?? [], profile);
+    }, [profile, tasksData]);
+
+    const taskIds = useMemo(() => visibleTasks.map((task) => task.id), [visibleTasks]);
+    const { data: activityLogData } = useActivityLogByTasks(taskIds);
 
     const tasks = useMemo(() => {
-        return getVisibleTasksForUser(state.tasks, state.currentUser)
-            .filter((task) => task.client_id === clientId)
-            .map((task) => ({
-                ...task,
-                assignee: state.profiles.find((profile) => profile.id === task.assignee_id),
-            }))
+        return [...visibleTasks]
             .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
-    }, [clientId, state.currentUser, state.profiles, state.tasks]);
+    }, [visibleTasks]);
 
     const clientInvoices = useMemo(() => {
-        return state.invoices
+        return (invoicesData ?? [])
             .filter((invoice) => invoice.client_id === clientId)
-            .map((invoice) => normalizeInvoiceStatus({
-                ...invoice,
-                client: state.clients.find((item) => item.id === invoice.client_id),
-            }))
+            .map((invoice) => normalizeInvoiceStatus(invoice))
             .sort((a, b) => new Date(b.issued_at).getTime() - new Date(a.issued_at).getTime());
-    }, [clientId, state.clients, state.invoices]);
+    }, [clientId, invoicesData]);
 
     const clientPayments = useMemo(() => {
-        return state.payments
+        return (paymentsData ?? [])
             .filter((payment) => payment.client_id === clientId)
-            .map((payment) => ({
-                ...payment,
-                client: state.clients.find((item) => item.id === payment.client_id),
-            }))
             .sort((a, b) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime());
-    }, [clientId, state.clients, state.payments]);
+    }, [clientId, paymentsData]);
 
     const billingSnapshot = useMemo(
         () => calculateClientBillingSnapshot(clientId, clientInvoices, clientPayments),
@@ -199,13 +207,13 @@ export default function ClientProfilePage() {
 
     const taxProfile = useMemo(() => {
         if (!client) return undefined;
-        return getClientTaxProfile(client.id);
-    }, [client, getClientTaxProfile]);
+        return buildTaxProfile({ client, licenses });
+    }, [client, licenses]);
 
     const taxObligations = useMemo(() => {
-        if (!client) return [];
-        return getClientObligations(client.id);
-    }, [client, getClientObligations]);
+        if (!taxProfile) return [];
+        return resolveObligations(taxProfile);
+    }, [taxProfile]);
 
     const obligationsByCadence = useMemo(() => {
         const groups: Record<'monthly' | 'quarterly' | 'annual' | 'event', typeof taxObligations> = {
@@ -250,7 +258,7 @@ export default function ClientProfilePage() {
 
         const taskIds = new Set(tasks.map((task) => task.id));
 
-        const activityEvents = state.activityLog
+        const activityEvents = (activityLogData ?? [])
             .filter((entry) => taskIds.has(entry.task_id))
             .map((entry) => ({
                 id: `act-${entry.id}`,
@@ -290,12 +298,12 @@ export default function ClientProfilePage() {
 
         return [clientEvent, ...activityEvents, ...licenseEvents]
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    }, [client, licenses, state.activityLog, tasks]);
+    }, [activityLogData, client, licenses, tasks]);
 
-    const defaultAssigneeId = isAccountant(state.currentUser)
-        ? state.currentUser.id
+    const defaultAssigneeId = profile && isAccountant(profile)
+        ? profile.id
         : client?.accountants?.[0]?.id
-        || state.profiles.find((profile) => profile.role === 'accountant' && profile.is_active)?.id;
+        || profiles.find((row) => row.role === 'accountant' && row.is_active)?.id;
 
     const handlePlanRegistryCheck = () => {
         if (!canManageLicense) return;
@@ -315,10 +323,10 @@ export default function ClientProfilePage() {
         const dueDate = targetLicense?.next_check_due || (() => {
             const fallback = new Date();
             fallback.setDate(fallback.getDate() + 7);
-            return fallback.toISOString();
+            return fallback.toISOString().slice(0, 10);
         })();
 
-        addTask({
+        createTaskMutation.mutate({
             title: `Звірка ліцензійного реєстру: ${getClientDisplayName(client)}`,
             description: [
                 `Клієнт: ${getClientDisplayName(client)}`,
@@ -336,12 +344,22 @@ export default function ClientProfilePage() {
             recurrence_days: undefined,
             proof_required: true,
             subtasks: [],
-            comments: [],
-            files: [],
         });
 
         alert('Задачу звірки створено у розділі "Завдання".');
     };
+
+    if (!profile) return null;
+
+    if (isClientLoading) {
+        return (
+            <div className="p-8">
+                <div className="card p-6 max-w-xl">
+                    <p className="text-sm text-text-muted">Завантаження клієнта...</p>
+                </div>
+            </div>
+        );
+    }
 
     if (!client) {
         return (
@@ -363,7 +381,7 @@ export default function ClientProfilePage() {
         );
     }
 
-    if (!canViewClient(state.currentUser, client)) {
+    if (!canViewClient(profile, client)) {
         return (
             <div className="p-8">
                 <div className="card p-6 max-w-xl">
@@ -383,7 +401,18 @@ export default function ClientProfilePage() {
         );
     }
 
-    const taxComplianceNotes = getTaxComplianceNotes(client, state.taxRulebook);
+    const effectiveTaxRulebook = taxRulebook ?? {
+        year: new Date().getFullYear(),
+        minimum_wage_on_january_1: 0,
+        single_tax_multipliers: {
+            single_tax_group1: 0,
+            single_tax_group2: 0,
+            single_tax_group3: 0,
+            single_tax_group4: 0,
+        },
+        vat_registration_threshold: 0,
+    };
+    const taxComplianceNotes = getTaxComplianceNotes(client, effectiveTaxRulebook);
     const incomeLimitMessage = getIncomeLimitControlMessage(client);
     const isIncomeLimitNotApplicable = !client.income_limit && (!client.tax_system || !isSingleTaxSystem(client.tax_system));
     const isVatPayer = isVatPayerByTaxSystem(client.tax_system);

@@ -9,11 +9,13 @@ import {
     PAYMENT_METHOD_LABELS,
     PAYMENT_STATUS_LABELS,
 } from '@/lib/types';
-import { useApp } from '@/lib/store';
 import { cn, formatDate } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import { calculateBillingSnapshot, formatMinorMoneyUAH, getInvoiceOutstandingMinor, normalizeInvoiceStatus } from '@/lib/billing';
 import { canAccessBilling, getVisibleClientsForUser } from '@/lib/rbac';
+import { useAuth } from '@/lib/auth-context';
+import { useClients } from '@/lib/hooks/use-clients';
+import { useInvoices, usePayments } from '@/lib/hooks/use-billing';
 
 type InvoiceFilter = 'all' | 'open' | 'overdue' | 'paid';
 
@@ -38,13 +40,18 @@ function filterInvoiceByTab(invoice: Invoice, tab: InvoiceFilter): boolean {
 }
 
 export default function BillingPage() {
-    const { state } = useApp();
+    const { profile } = useAuth();
+    const { data: clientsData } = useClients();
+    const { data: invoicesData } = useInvoices();
+    const { data: paymentsData } = usePayments();
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilter, setActiveFilter] = useState<InvoiceFilter>('all');
 
+    if (!profile) return null;
+
     const visibleClients = useMemo(
-        () => getVisibleClientsForUser(state.clients, state.currentUser),
-        [state.clients, state.currentUser]
+        () => getVisibleClientsForUser(clientsData ?? [], profile),
+        [clientsData, profile]
     );
     const visibleClientIds = useMemo(
         () => new Set(visibleClients.map((client) => client.id)),
@@ -52,24 +59,24 @@ export default function BillingPage() {
     );
 
     const invoices = useMemo(() => {
-        return state.invoices
+        return (invoicesData ?? [])
             .filter((invoice) => visibleClientIds.has(invoice.client_id))
             .map((invoice) => normalizeInvoiceStatus({
                 ...invoice,
                 client: visibleClients.find((client) => client.id === invoice.client_id),
             }))
             .sort((a, b) => new Date(b.issued_at).getTime() - new Date(a.issued_at).getTime());
-    }, [state.invoices, visibleClientIds, visibleClients]);
+    }, [invoicesData, visibleClientIds, visibleClients]);
 
     const payments = useMemo(() => {
-        return state.payments
+        return (paymentsData ?? [])
             .filter((payment) => visibleClientIds.has(payment.client_id))
             .map((payment) => ({
                 ...payment,
                 client: visibleClients.find((client) => client.id === payment.client_id),
             }))
             .sort((a, b) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime());
-    }, [state.payments, visibleClientIds, visibleClients]);
+    }, [paymentsData, visibleClientIds, visibleClients]);
 
     const billingSnapshot = useMemo(
         () => calculateBillingSnapshot(invoices, payments),
@@ -91,7 +98,7 @@ export default function BillingPage() {
         );
     });
 
-    if (!canAccessBilling(state.currentUser)) {
+    if (!canAccessBilling(profile)) {
         return (
             <div className="p-8">
                 <div className="card p-6 max-w-xl">

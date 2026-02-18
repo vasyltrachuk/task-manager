@@ -7,19 +7,16 @@ import {
     ChevronLeft,
     ChevronRight,
     UserPlus,
-    Key,
-    Copy,
     Check,
-    Eye,
-    EyeOff,
     MoreVertical,
     UserX,
     Pencil,
-    RefreshCw,
     Users,
     Shield,
 } from 'lucide-react';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
+import { useProfiles, useDeactivateProfile } from '@/lib/hooks/use-profiles';
+import { useTasks } from '@/lib/hooks/use-tasks';
 import { Profile } from '@/lib/types';
 import { cn, getInitials, formatDate } from '@/lib/utils';
 import AccountantFormModal from '@/components/team/accountant-form-modal';
@@ -59,9 +56,11 @@ function getTaskCountForDay(accountantId: string, dayIndex: number, accountantsL
 }
 
 export default function TeamLoadPage() {
-    const { state, deactivateProfile, regeneratePassword } = useApp();
-    const canManage = canManageTeam(state.currentUser);
-    const accountants = state.profiles.filter((p: Profile) => p.role === 'accountant');
+    const { profile } = useAuth();
+    const { data: profiles } = useProfiles();
+    const { data: tasks } = useTasks();
+    const deactivateProfileMutation = useDeactivateProfile();
+
     const [activeTab, setActiveTab] = useState<'manage' | 'capacity'>('manage');
     const [searchQuery, setSearchQuery] = useState('');
     const [currentDate] = useState(new Date('2023-10-23'));
@@ -72,10 +71,12 @@ export default function TeamLoadPage() {
     const [editProfile, setEditProfile] = useState<Profile | null>(null);
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
-    // Password reveal state (per-profile)
-    const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
     const [copiedField, setCopiedField] = useState<string | null>(null);
-    const [regeneratedPasswords, setRegeneratedPasswords] = useState<Record<string, string>>({});
+
+    if (!profile) return null;
+
+    const canManage = canManageTeam(profile!);
+    const accountants = (profiles ?? []).filter((p: Profile) => p.role === 'accountant');
 
     if (!canManage) {
         return (
@@ -102,13 +103,6 @@ export default function TeamLoadPage() {
         setTimeout(() => setCopiedField(null), 2000);
     };
 
-    const handleRegeneratePassword = (profileId: string) => {
-        const newPassword = regeneratePassword(profileId);
-        setRegeneratedPasswords(prev => ({ ...prev, [profileId]: newPassword }));
-        setRevealedPasswords(prev => ({ ...prev, [profileId]: true }));
-        setMenuOpenId(null);
-    };
-
     const handleEdit = (profile: Profile) => {
         setEditProfile(profile);
         setShowFormModal(true);
@@ -116,7 +110,7 @@ export default function TeamLoadPage() {
     };
 
     const handleDeactivate = (profileId: string) => {
-        deactivateProfile(profileId);
+        deactivateProfileMutation.mutate(profileId);
         setMenuOpenId(null);
     };
 
@@ -180,7 +174,7 @@ export default function TeamLoadPage() {
             {activeTab === 'manage' && (
                 <div className="flex-1 overflow-y-auto">
                     {/* Stats bar */}
-                    <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="grid grid-cols-2 gap-4 mb-6">
                         <div className="card p-4">
                             <div className="text-2xl font-bold text-brand-600">{accountants.filter(a => a.is_active).length}</div>
                             <div className="text-xs text-text-muted font-medium mt-0.5">Активних бухгалтерів</div>
@@ -189,18 +183,12 @@ export default function TeamLoadPage() {
                             <div className="text-2xl font-bold text-text-primary">{accountants.length}</div>
                             <div className="text-xs text-text-muted font-medium mt-0.5">Всього акаунтів</div>
                         </div>
-                        <div className="card p-4">
-                            <div className="text-2xl font-bold text-amber-500">{accountants.filter(a => a.generated_password && !a.password_changed).length}</div>
-                            <div className="text-xs text-text-muted font-medium mt-0.5">Не змінили пароль</div>
-                        </div>
                     </div>
 
                     {/* Accountant Cards */}
                     <div className="space-y-3">
                         {filteredAccountants.map((acc) => {
-                            const activeTasks = state.tasks.filter(t => t.assignee_id === acc.id && t.status !== 'done');
-                            const password = regeneratedPasswords[acc.id] || acc.generated_password;
-                            const isRevealed = revealedPasswords[acc.id];
+                            const activeTasks = (tasks ?? []).filter(t => t.assignee_id === acc.id && t.status !== 'done');
 
                             return (
                                 <div
@@ -234,11 +222,6 @@ export default function TeamLoadPage() {
                                                         Деактивований
                                                     </span>
                                                 )}
-                                                {password && !acc.password_changed && (
-                                                    <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
-                                                        Не змінив пароль
-                                                    </span>
-                                                )}
                                             </div>
                                             <div className="flex items-center gap-4 text-xs text-text-muted">
                                                 <span>{acc.phone}</span>
@@ -247,37 +230,6 @@ export default function TeamLoadPage() {
                                                 <span>• Створено {formatDate(acc.created_at)}</span>
                                             </div>
                                         </div>
-
-                                        {/* Credentials */}
-                                        {password && acc.is_active && (
-                                            <div className="flex items-center gap-2 flex-shrink-0">
-                                                <div className="flex items-center gap-1 px-3 py-1.5 bg-surface-50 border border-surface-200 rounded-lg">
-                                                    <Key size={12} className="text-text-muted" />
-                                                    <span className="text-xs font-mono text-text-secondary">
-                                                        {isRevealed ? password : '••••••••'}
-                                                    </span>
-                                                    <button
-                                                        onClick={() => setRevealedPasswords(prev => ({
-                                                            ...prev,
-                                                            [acc.id]: !prev[acc.id]
-                                                        }))}
-                                                        className="text-text-muted hover:text-text-primary ml-1 transition-colors"
-                                                    >
-                                                        {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleCopy(password, `pass-${acc.id}`)}
-                                                        className="text-text-muted hover:text-text-primary ml-0.5 transition-colors"
-                                                    >
-                                                        {copiedField === `pass-${acc.id}` ? (
-                                                            <Check size={12} className="text-emerald-500" />
-                                                        ) : (
-                                                            <Copy size={12} />
-                                                        )}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
 
                                         {/* Actions menu */}
                                         <div className="relative flex-shrink-0">
@@ -295,23 +247,6 @@ export default function TeamLoadPage() {
                                                         className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-50 transition-colors"
                                                     >
                                                         <Pencil size={14} /> Редагувати
-                                                    </button>
-                                                    {acc.is_active && (
-                                                        <button
-                                                            onClick={() => handleRegeneratePassword(acc.id)}
-                                                            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-50 transition-colors"
-                                                        >
-                                                            <RefreshCw size={14} /> Перегенерувати пароль
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        onClick={() => {
-                                                            handleCopy(`Логін: ${acc.phone}\nПароль: ${password || 'Н/Д'}`, `all-${acc.id}`);
-                                                            setMenuOpenId(null);
-                                                        }}
-                                                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-50 transition-colors"
-                                                    >
-                                                        <Copy size={14} /> Скопіювати дані входу
                                                     </button>
                                                     <div className="border-t border-surface-100 my-1" />
                                                     {acc.is_active ? (

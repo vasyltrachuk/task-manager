@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { X, Building2, User, Phone, Mail, Hash, FileText } from 'lucide-react';
+import { X, Building2, User, Phone, Mail, Hash, FileText, RefreshCw } from 'lucide-react';
 import {
     Client,
     ClientType,
@@ -12,8 +12,9 @@ import {
     CLIENT_TYPE_LABELS,
     CLIENT_TAX_ID_TYPE_LABELS,
     TAX_SYSTEM_LABELS,
+    type TaxRulebookConfig,
 } from '@/lib/types';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
 import { cn, formatMoneyUAH } from '@/lib/utils';
 import {
     calculateIncomeLimitByTaxSystem,
@@ -30,6 +31,15 @@ import {
     TAX_PROFILE_RISK_FLAG_LABELS,
     TAX_PROFILE_SUBJECT_LABELS,
 } from '@/lib/tax-profile';
+import { useProfiles } from '@/lib/hooks/use-profiles';
+import { useTaxRulebook } from '@/lib/hooks/use-tax-rulebook';
+import { useLicenses } from '@/lib/hooks/use-licenses';
+import {
+    useCreateClient,
+    useDpsClientPrefill,
+    useUpdateClient,
+    type DpsClientPrefillSuggestion,
+} from '@/lib/hooks/use-clients';
 
 interface ClientFormModalProps {
     isOpen: boolean;
@@ -61,9 +71,74 @@ const CLIENT_NAME_PLACEHOLDERS: Record<ClientType, string> = {
 };
 
 const TAX_ID_PLACEHOLDERS: Record<ClientTaxIdType, string> = {
-    ipn: '1234567890',
+    rnokpp: '1234567890',
     edrpou: '12345678',
 };
+
+const TAX_ID_LENGTH_BY_TYPE: Record<ClientTaxIdType, number> = {
+    rnokpp: 10,
+    edrpou: 8,
+};
+
+function normalizeTaxIdInput(value: string): string {
+    return value.replace(/\D/g, '');
+}
+
+function isTaxIdValidForType(taxId: string, taxIdType: ClientTaxIdType): boolean {
+    return /^\d+$/.test(taxId) && taxId.length === TAX_ID_LENGTH_BY_TYPE[taxIdType];
+}
+
+function mergeNotesWithDpsAutofill(existingNotes: string, dpsNote: string): string {
+    const normalizedDpsNote = dpsNote.trim();
+    if (!normalizedDpsNote) return existingNotes;
+
+    const normalizedExisting = existingNotes.trim();
+    if (!normalizedExisting) return normalizedDpsNote;
+    if (normalizedExisting.includes(normalizedDpsNote)) return normalizedExisting;
+    return `${normalizedExisting}\n\n${normalizedDpsNote}`;
+}
+
+function applyDpsPrefillSuggestion(
+    formData: ClientFormData,
+    suggestion: DpsClientPrefillSuggestion
+): { nextFormData: ClientFormData; appliedFields: string[] } {
+    const next = { ...formData };
+    const appliedFields: string[] = [];
+
+    if (suggestion.name && normalizeClientName(suggestion.name) && suggestion.name !== formData.name) {
+        next.name = suggestion.name;
+        appliedFields.push('назва');
+    }
+
+    if (suggestion.type && suggestion.type !== formData.type) {
+        const previousDefaultTaxIdType = CLIENT_DEFAULT_TAX_ID_TYPE_BY_CLIENT_TYPE[formData.type];
+        const nextDefaultTaxIdType = CLIENT_DEFAULT_TAX_ID_TYPE_BY_CLIENT_TYPE[suggestion.type];
+
+        next.type = suggestion.type;
+        next.tax_id_type = formData.tax_id_type === previousDefaultTaxIdType
+            ? nextDefaultTaxIdType
+            : formData.tax_id_type;
+        appliedFields.push('тип');
+    }
+
+    if (suggestion.tax_system && suggestion.tax_system !== formData.tax_system) {
+        next.tax_system = suggestion.tax_system;
+        appliedFields.push('система оподаткування');
+    }
+
+    if (suggestion.notes) {
+        const mergedNotes = mergeNotesWithDpsAutofill(formData.notes, suggestion.notes);
+        if (mergedNotes !== formData.notes) {
+            next.notes = mergedNotes;
+            appliedFields.push('нотатки');
+        }
+    }
+
+    return {
+        nextFormData: next,
+        appliedFields,
+    };
+}
 
 function getInitialFormData(editClient?: Client | null): ClientFormData {
     if (editClient) {
@@ -100,14 +175,36 @@ function getInitialFormData(editClient?: Client | null): ClientFormData {
 }
 
 export default function ClientFormModal({ isOpen, onClose, editClient }: ClientFormModalProps) {
-    const { state, addClient, updateClient } = useApp();
-    const assignees = state.profiles.filter(p => p.role === 'accountant' && p.is_active);
-    const canManageClient = canManageClients(state.currentUser);
+    const { profile } = useAuth();
+    const { data: profilesData } = useProfiles();
+    const { data: taxRulebook } = useTaxRulebook();
+    const { data: licensesData } = useLicenses();
+    const createClientMutation = useCreateClient();
+    const updateClientMutation = useUpdateClient();
+    const dpsPrefillMutation = useDpsClientPrefill();
+
+    const assignees = (profilesData ?? []).filter(p => p.role === 'accountant' && p.is_active);
+    const canManageClient = profile ? canManageClients(profile) : false;
+    const effectiveTaxRulebook: TaxRulebookConfig = taxRulebook ?? {
+        year: new Date().getFullYear(),
+        minimum_wage_on_january_1: 0,
+        single_tax_multipliers: {
+            single_tax_group1: 0,
+            single_tax_group2: 0,
+            single_tax_group3: 0,
+            single_tax_group4: 0,
+        },
+        vat_registration_threshold: 0,
+    };
 
     const [formData, setFormData] = useState<ClientFormData>(() => getInitialFormData(editClient));
 
     const [errors, setErrors] = useState<Record<string, string>>({});
-    const autoIncomeLimit = calculateIncomeLimitByTaxSystem(formData.tax_system, state.taxRulebook);
+    const [dpsPrefillError, setDpsPrefillError] = useState<string | null>(null);
+    const [dpsPrefillMessage, setDpsPrefillMessage] = useState<string | null>(null);
+    const normalizedTaxId = normalizeTaxIdInput(formData.tax_id);
+    const isTaxIdValid = isTaxIdValidForType(normalizedTaxId, formData.tax_id_type);
+    const autoIncomeLimit = calculateIncomeLimitByTaxSystem(formData.tax_system, effectiveTaxRulebook);
     const usesRulebookIncomeLimit = isSingleTaxSystem(formData.tax_system || undefined);
     const isVatPayer = isVatPayerByTaxSystem(formData.tax_system || undefined);
     const previewClient = useMemo<Client>(() => {
@@ -118,7 +215,7 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
             name: normalizedName || formData.name || '—',
             type: formData.type,
             tax_id_type: formData.tax_id_type,
-            tax_id: formData.tax_id.trim(),
+            tax_id: normalizeTaxIdInput(formData.tax_id),
             status: formData.status,
             tax_system: formData.tax_system || undefined,
             is_vat_payer: isVatPayerByTaxSystem(formData.tax_system || undefined),
@@ -154,8 +251,8 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
         usesRulebookIncomeLimit,
     ]);
     const previewLicenses = useMemo(
-        () => (editClient ? state.licenses.filter((license) => license.client_id === editClient.id) : []),
-        [editClient, state.licenses]
+        () => (editClient ? (licensesData ?? []).filter((license) => license.client_id === editClient.id) : []),
+        [editClient, licensesData]
     );
     const previewTaxProfile = useMemo(
         () => buildTaxProfile({ client: previewClient, licenses: previewLicenses }),
@@ -184,7 +281,11 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
         const e: Record<string, string> = {};
         if (!normalizeClientName(formData.name)) e.name = "Обов'язкове поле";
         if (!formData.type) e.type = "Оберіть тип";
-        if (!formData.tax_id.trim()) e.tax_id = `Вкажіть ${CLIENT_TAX_ID_TYPE_LABELS[formData.tax_id_type]}`;
+        if (!normalizedTaxId) {
+            e.tax_id = `Вкажіть ${CLIENT_TAX_ID_TYPE_LABELS[formData.tax_id_type]}`;
+        } else if (!isTaxIdValidForType(normalizedTaxId, formData.tax_id_type)) {
+            e.tax_id = `${CLIENT_TAX_ID_TYPE_LABELS[formData.tax_id_type]} має містити ${TAX_ID_LENGTH_BY_TYPE[formData.tax_id_type]} цифр`;
+        }
         if (!formData.tax_system) e.tax_system = 'Оберіть систему оподаткування';
         if (formData.assignee_ids.length === 0) e.assignee_ids = 'Призначте фахівця';
         setErrors(e);
@@ -197,7 +298,7 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
         const resolvedIncomeLimit = usesRulebookIncomeLimit
             ? autoIncomeLimit
             : undefined;
-        const resolvedIncomeLimitSource = usesRulebookIncomeLimit
+        const resolvedIncomeLimitSource: Client['income_limit_source'] = usesRulebookIncomeLimit
             ? 'rulebook'
             : undefined;
         const resolvedTaxSystem = formData.tax_system || undefined;
@@ -207,7 +308,7 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
             name: normalizedName,
             type: formData.type,
             tax_id_type: formData.tax_id_type,
-            tax_id: formData.tax_id.trim(),
+            tax_id: normalizedTaxId,
             status: formData.status,
             tax_system: resolvedTaxSystem,
             is_vat_payer: isVatPayerByTaxSystem(resolvedTaxSystem),
@@ -218,17 +319,16 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
             employee_count: formData.employee_count || undefined,
             industry: formData.industry || undefined,
             notes: formData.notes || undefined,
-            accountants: assignees.filter(a => formData.assignee_ids.includes(a.id)),
+            accountant_ids: formData.assignee_ids,
         };
 
         if (editClient) {
-            updateClient({
-                ...editClient,
+            updateClientMutation.mutate({
                 ...clientData,
-                updated_at: new Date().toISOString(),
-            } as Client);
+                id: editClient.id,
+            });
         } else {
-            addClient(clientData as Omit<Client, 'id' | 'created_at' | 'updated_at'>);
+            createClientMutation.mutate(clientData);
         }
         onClose();
     };
@@ -240,6 +340,8 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
                 ? prev.assignee_ids.filter(x => x !== id)
                 : [...prev.assignee_ids, id],
         }));
+        setDpsPrefillError(null);
+        setDpsPrefillMessage(null);
     };
 
     const handleClientTypeChange = (nextType: ClientType) => {
@@ -257,7 +359,43 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
         });
     };
 
+    const handleDpsPrefill = async () => {
+        if (!isTaxIdValid) {
+            setDpsPrefillMessage(null);
+            setDpsPrefillError(`${CLIENT_TAX_ID_TYPE_LABELS[formData.tax_id_type]} має містити ${TAX_ID_LENGTH_BY_TYPE[formData.tax_id_type]} цифр.`);
+            return;
+        }
+
+        try {
+            setDpsPrefillError(null);
+            setDpsPrefillMessage(null);
+
+            const payload = await dpsPrefillMutation.mutateAsync({
+                taxIdType: formData.tax_id_type,
+                taxId: normalizedTaxId,
+                accountantIds: formData.assignee_ids,
+            });
+
+            const { nextFormData, appliedFields } = applyDpsPrefillSuggestion(formData, payload.suggestion);
+            setFormData(nextFormData);
+
+            const sourceSummary = payload.sources
+                .map((source) => `${source.registry_code}: ${source.status}`)
+                .join(', ');
+
+            if (appliedFields.length === 0) {
+                setDpsPrefillMessage(`Дані ДПС отримано, але нових полів для оновлення немає. Джерела: ${sourceSummary}.`);
+                return;
+            }
+
+            setDpsPrefillMessage(`Автозаповнення застосовано: ${appliedFields.join(', ')}. Джерела: ${sourceSummary}.`);
+        } catch (error) {
+            setDpsPrefillError(error instanceof Error ? error.message : 'Не вдалося отримати дані ДПС.');
+        }
+    };
+
     if (!isOpen) return null;
+    if (!profile) return null;
     if (!canManageClient) return null;
 
     return (
@@ -366,7 +504,11 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
                                     <button
                                         key={taxIdType}
                                         type="button"
-                                        onClick={() => setFormData(prev => ({ ...prev, tax_id_type: taxIdType }))}
+                                        onClick={() => {
+                                            setFormData(prev => ({ ...prev, tax_id_type: taxIdType }));
+                                            setDpsPrefillError(null);
+                                            setDpsPrefillMessage(null);
+                                        }}
                                         className={cn(
                                             'px-3 py-1.5 text-xs font-semibold rounded-md transition-colors',
                                             formData.tax_id_type === taxIdType
@@ -381,14 +523,43 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
                             <input
                                 type="text"
                                 value={formData.tax_id}
-                                onChange={(e) => setFormData(prev => ({ ...prev, tax_id: e.target.value }))}
+                                onChange={(e) => {
+                                    const nextTaxId = normalizeTaxIdInput(e.target.value);
+                                    setFormData(prev => ({ ...prev, tax_id: nextTaxId }));
+                                    setErrors(prev => ({ ...prev, tax_id: '' }));
+                                    setDpsPrefillError(null);
+                                    setDpsPrefillMessage(null);
+                                }}
                                 placeholder={TAX_ID_PLACEHOLDERS[formData.tax_id_type]}
                                 className={cn(
                                     'w-full px-4 py-3 bg-white border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-brand-200 transition-all',
                                     errors.tax_id ? 'border-red-400' : 'border-surface-200'
                                 )}
                             />
+                            {!editClient && (
+                                <div className="mt-2 space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleDpsPrefill}
+                                        disabled={!isTaxIdValid || dpsPrefillMutation.isPending}
+                                        className={cn(
+                                            'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors',
+                                            !isTaxIdValid || dpsPrefillMutation.isPending
+                                                ? 'bg-surface-100 text-text-muted cursor-not-allowed'
+                                                : 'bg-brand-50 text-brand-700 hover:bg-brand-100'
+                                        )}
+                                    >
+                                        <RefreshCw size={13} className={cn(dpsPrefillMutation.isPending && 'animate-spin')} />
+                                        Підтягнути з ДПС
+                                    </button>
+                                    <p className="text-[11px] text-text-muted">
+                                        Автозаповнення використовує токен призначеного бухгалтера або будь-який активний токен у tenant.
+                                    </p>
+                                </div>
+                            )}
                             {errors.tax_id && <p className="text-xs text-red-500 mt-1">{errors.tax_id}</p>}
+                            {dpsPrefillError && <p className="text-xs text-red-500 mt-1">{dpsPrefillError}</p>}
+                            {dpsPrefillMessage && <p className="text-xs text-emerald-700 mt-1">{dpsPrefillMessage}</p>}
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
@@ -490,7 +661,7 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
                         </label>
                         <div className="rounded-lg border border-surface-200 bg-surface-50 px-4 py-3">
                             <div className="flex items-center justify-between gap-2">
-                                <span className="text-sm text-text-muted">Розраховано за rulebook ({state.taxRulebook.year})</span>
+                                <span className="text-sm text-text-muted">Розраховано за rulebook ({effectiveTaxRulebook.year})</span>
                                 <span className={cn(
                                     'text-sm font-semibold',
                                     autoIncomeLimit ? 'text-brand-700' : 'text-text-muted'

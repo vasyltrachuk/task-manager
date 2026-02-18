@@ -4,7 +4,7 @@ export type UserRole = 'admin' | 'accountant' | 'lawyer' | 'hr' | 'auditor' | 'm
 export type ClientType = 'FOP' | 'LLC' | 'OSBB' | 'NGO' | 'GRANT';
 
 export type ClientStatus = 'active' | 'onboarding' | 'archived';
-export type ClientTaxIdType = 'ipn' | 'edrpou';
+export type ClientTaxIdType = 'rnokpp' | 'edrpou';
 
 export type TaxSystem =
   | 'single_tax_group1'
@@ -376,12 +376,12 @@ export const CLIENT_TYPE_LABELS: Record<ClientType, string> = {
 };
 
 export const CLIENT_TAX_ID_TYPE_LABELS: Record<ClientTaxIdType, string> = {
-  ipn: 'РНОКПП',
+  rnokpp: 'РНОКПП',
   edrpou: 'ЄДРПОУ',
 };
 
 export const CLIENT_DEFAULT_TAX_ID_TYPE_BY_CLIENT_TYPE: Record<ClientType, ClientTaxIdType> = {
-  FOP: 'ipn',
+  FOP: 'rnokpp',
   LLC: 'edrpou',
   OSBB: 'edrpou',
   NGO: 'edrpou',

@@ -1,13 +1,27 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Bell, Shield, Database, Palette, SlidersHorizontal, Save, Plug } from 'lucide-react';
-import { useApp } from '@/lib/store';
+import { useAuth } from '@/lib/auth-context';
+import { useTaxRulebook, useUpdateTaxRulebook } from '@/lib/hooks/use-tax-rulebook';
+import { useClients } from '@/lib/hooks/use-clients';
 import { TaxRulebookConfig } from '@/lib/types';
 import { calculateIncomeLimitByTaxSystem } from '@/lib/tax';
 import { cn, formatMoneyUAH } from '@/lib/utils';
 import { canAccessIntegrations, canManageSettings } from '@/lib/rbac';
+
+const DEFAULT_RULEBOOK: TaxRulebookConfig = {
+    year: 2026,
+    minimum_wage_on_january_1: 0,
+    single_tax_multipliers: {
+        single_tax_group1: 0,
+        single_tax_group2: 0,
+        single_tax_group3: 0,
+        single_tax_group4: 0,
+    },
+    vat_registration_threshold: 0,
+};
 
 function isRulebookValid(rulebook: TaxRulebookConfig): boolean {
     return (
@@ -22,10 +36,18 @@ function isRulebookValid(rulebook: TaxRulebookConfig): boolean {
 }
 
 export default function SettingsPage() {
-    const { state, updateTaxRulebook } = useApp();
-    const canManage = canManageSettings(state.currentUser);
-    const canOpenIntegrations = canAccessIntegrations(state.currentUser);
-    const [form, setForm] = useState<TaxRulebookConfig>(state.taxRulebook);
+    const { profile } = useAuth();
+    const { data: taxRulebook } = useTaxRulebook();
+    const { data: clients } = useClients();
+    const updateTaxRulebookMutation = useUpdateTaxRulebook();
+
+    const [form, setForm] = useState<TaxRulebookConfig>(taxRulebook ?? DEFAULT_RULEBOOK);
+
+    useEffect(() => {
+        if (taxRulebook) {
+            setForm(taxRulebook);
+        }
+    }, [taxRulebook]);
 
     const calculatedLimits = useMemo(() => {
         return {
@@ -36,9 +58,16 @@ export default function SettingsPage() {
         };
     }, [form]);
 
-    const isDirty = JSON.stringify(form) !== JSON.stringify(state.taxRulebook);
+    if (!profile) {
+        return null;
+    }
+
+    const canManage = canManageSettings(profile!);
+    const canOpenIntegrations = canAccessIntegrations(profile!);
+
+    const isDirty = JSON.stringify(form) !== JSON.stringify(taxRulebook ?? DEFAULT_RULEBOOK);
     const isValid = isRulebookValid(form);
-    const autoClientsCount = state.clients.filter((client) => client.tax_system?.startsWith('single_tax_group')).length;
+    const autoClientsCount = (clients ?? []).filter((client) => client.tax_system?.startsWith('single_tax_group')).length;
 
     const handleSave = () => {
         const normalized: TaxRulebookConfig = {
@@ -55,7 +84,7 @@ export default function SettingsPage() {
 
         if (!isRulebookValid(normalized)) return;
 
-        updateTaxRulebook(normalized);
+        updateTaxRulebookMutation.mutate(normalized);
         setForm(normalized);
     };
 
