@@ -136,7 +136,7 @@ function ClientCard({
                     <button
                         onClick={(e) => { e.stopPropagation(); onCreateTask(client); }}
                         className="h-7 inline-flex items-center gap-1 px-2 rounded-md bg-brand-50 hover:bg-brand-100 text-brand-700 transition-colors text-[11px] font-semibold"
-                        title="+ Нове завдання"
+                        title="+ Додати завдання"
                     >
                         <Plus size={12} />
                         <span className="hidden lg:inline">Завдання</span>
@@ -464,7 +464,7 @@ function ClientsPageContent() {
                             className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700 transition-colors shadow-sm"
                         >
                             <Plus size={16} />
-                            Новий клієнт
+                            Додати клієнта
                         </button>
                     </div>
                 )}
@@ -670,7 +670,7 @@ function ClientsPageContent() {
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); handleQuickCreateTask(client); }}
                                                         className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-brand-50 text-text-muted hover:text-brand-600 transition-colors"
-                                                        title="+ Нове завдання"
+                                                        title="+ Додати завдання"
                                                     >
                                                         <Plus size={13} />
                                                     </button>

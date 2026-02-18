@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Bell, Shield, Database, Palette, SlidersHorizontal, Save, Plug } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
@@ -10,6 +10,7 @@ import { TaxRulebookConfig } from '@/lib/types';
 import { calculateIncomeLimitByTaxSystem } from '@/lib/tax';
 import { cn, formatMoneyUAH } from '@/lib/utils';
 import { canAccessIntegrations, canManageSettings } from '@/lib/rbac';
+import AccessDeniedCard from '@/components/ui/access-denied-card';
 
 const DEFAULT_RULEBOOK: TaxRulebookConfig = {
     year: 2026,
@@ -40,14 +41,13 @@ export default function SettingsPage() {
     const { data: taxRulebook } = useTaxRulebook();
     const { data: clients } = useClients();
     const updateTaxRulebookMutation = useUpdateTaxRulebook();
+    const baselineRulebook = taxRulebook ?? DEFAULT_RULEBOOK;
 
-    const [form, setForm] = useState<TaxRulebookConfig>(taxRulebook ?? DEFAULT_RULEBOOK);
-
-    useEffect(() => {
-        if (taxRulebook) {
-            setForm(taxRulebook);
-        }
-    }, [taxRulebook]);
+    const [editedForm, setEditedForm] = useState<TaxRulebookConfig | null>(null);
+    const form = editedForm ?? baselineRulebook;
+    const updateForm = (updater: (current: TaxRulebookConfig) => TaxRulebookConfig) => {
+        setEditedForm((prev) => updater(prev ?? baselineRulebook));
+    };
 
     const calculatedLimits = useMemo(() => {
         return {
@@ -62,10 +62,10 @@ export default function SettingsPage() {
         return null;
     }
 
-    const canManage = canManageSettings(profile!);
-    const canOpenIntegrations = canAccessIntegrations(profile!);
+    const canManage = canManageSettings(profile);
+    const canOpenIntegrations = canAccessIntegrations(profile);
 
-    const isDirty = JSON.stringify(form) !== JSON.stringify(taxRulebook ?? DEFAULT_RULEBOOK);
+    const isDirty = JSON.stringify(form) !== JSON.stringify(baselineRulebook);
     const isValid = isRulebookValid(form);
     const autoClientsCount = (clients ?? []).filter((client) => client.tax_system?.startsWith('single_tax_group')).length;
 
@@ -84,28 +84,28 @@ export default function SettingsPage() {
 
         if (!isRulebookValid(normalized)) return;
 
-        updateTaxRulebookMutation.mutate(normalized);
-        setForm(normalized);
+        updateTaxRulebookMutation.mutate(normalized, {
+            onSuccess: () => {
+                setEditedForm(null);
+            },
+        });
     };
 
     if (!canManage) {
+        const integrationsAction = canOpenIntegrations ? (
+            <Link
+                href="/settings/integrations"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold transition-colors"
+            >
+                Відкрити інтеграції
+            </Link>
+        ) : undefined;
+
         return (
-            <div className="p-8">
-                <div className="card p-6 max-w-xl">
-                    <h1 className="text-xl font-bold text-text-primary mb-2">Немає доступу</h1>
-                    <p className="text-sm text-text-muted">
-                        Налаштування податкового rulebook доступні лише адміністратору.
-                    </p>
-                    {canOpenIntegrations && (
-                        <Link
-                            href="/settings/integrations"
-                            className="inline-flex mt-4 items-center gap-1.5 px-4 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold transition-colors"
-                        >
-                            Відкрити інтеграції
-                        </Link>
-                    )}
-                </div>
-            </div>
+            <AccessDeniedCard
+                message="Налаштування податкового rulebook доступні лише адміністратору."
+                action={integrationsAction}
+            />
         );
     }
 
@@ -149,7 +149,7 @@ export default function SettingsPage() {
                             type="number"
                             min="2020"
                             value={form.year}
-                            onChange={(e) => setForm((prev) => ({ ...prev, year: Number(e.target.value) || 0 }))}
+                            onChange={(e) => updateForm((prev) => ({ ...prev, year: Number(e.target.value) || 0 }))}
                             className="w-full px-3 py-2.5 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-200"
                         />
                     </div>
@@ -161,7 +161,7 @@ export default function SettingsPage() {
                             type="number"
                             min="0"
                             value={form.minimum_wage_on_january_1}
-                            onChange={(e) => setForm((prev) => ({ ...prev, minimum_wage_on_january_1: Number(e.target.value) || 0 }))}
+                            onChange={(e) => updateForm((prev) => ({ ...prev, minimum_wage_on_january_1: Number(e.target.value) || 0 }))}
                             className="w-full px-3 py-2.5 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-200"
                         />
                     </div>
@@ -173,7 +173,7 @@ export default function SettingsPage() {
                             type="number"
                             min="0"
                             value={form.vat_registration_threshold}
-                            onChange={(e) => setForm((prev) => ({ ...prev, vat_registration_threshold: Number(e.target.value) || 0 }))}
+                            onChange={(e) => updateForm((prev) => ({ ...prev, vat_registration_threshold: Number(e.target.value) || 0 }))}
                             className="w-full px-3 py-2.5 border border-surface-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-200"
                         />
                     </div>
@@ -186,7 +186,7 @@ export default function SettingsPage() {
                             type="number"
                             min="0"
                             value={form.single_tax_multipliers.single_tax_group1}
-                            onChange={(e) => setForm((prev) => ({
+                            onChange={(e) => updateForm((prev) => ({
                                 ...prev,
                                 single_tax_multipliers: {
                                     ...prev.single_tax_multipliers,
@@ -202,7 +202,7 @@ export default function SettingsPage() {
                             type="number"
                             min="0"
                             value={form.single_tax_multipliers.single_tax_group2}
-                            onChange={(e) => setForm((prev) => ({
+                            onChange={(e) => updateForm((prev) => ({
                                 ...prev,
                                 single_tax_multipliers: {
                                     ...prev.single_tax_multipliers,
@@ -218,7 +218,7 @@ export default function SettingsPage() {
                             type="number"
                             min="0"
                             value={form.single_tax_multipliers.single_tax_group3}
-                            onChange={(e) => setForm((prev) => ({
+                            onChange={(e) => updateForm((prev) => ({
                                 ...prev,
                                 single_tax_multipliers: {
                                     ...prev.single_tax_multipliers,
@@ -234,7 +234,7 @@ export default function SettingsPage() {
                             type="number"
                             min="0"
                             value={form.single_tax_multipliers.single_tax_group4}
-                            onChange={(e) => setForm((prev) => ({
+                            onChange={(e) => updateForm((prev) => ({
                                 ...prev,
                                 single_tax_multipliers: {
                                     ...prev.single_tax_multipliers,

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowDownCircle, Search, Wallet } from 'lucide-react';
 import {
     Invoice,
+    Profile,
     INVOICE_STATUS_COLORS,
     INVOICE_STATUS_LABELS,
     PAYMENT_METHOD_LABELS,
@@ -16,6 +17,7 @@ import { canAccessBilling, getVisibleClientsForUser } from '@/lib/rbac';
 import { useAuth } from '@/lib/auth-context';
 import { useClients } from '@/lib/hooks/use-clients';
 import { useInvoices, usePayments } from '@/lib/hooks/use-billing';
+import AccessDeniedCard from '@/components/ui/access-denied-card';
 
 type InvoiceFilter = 'all' | 'open' | 'overdue' | 'paid';
 
@@ -41,13 +43,21 @@ function filterInvoiceByTab(invoice: Invoice, tab: InvoiceFilter): boolean {
 
 export default function BillingPage() {
     const { profile } = useAuth();
+    if (!profile) return null;
+
+    if (!canAccessBilling(profile)) {
+        return <AccessDeniedCard message="Ви не маєте прав для перегляду оплат." />;
+    }
+
+    return <BillingPageContent profile={profile} />;
+}
+
+function BillingPageContent({ profile }: { profile: Profile }) {
     const { data: clientsData } = useClients();
     const { data: invoicesData } = useInvoices();
     const { data: paymentsData } = usePayments();
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilter, setActiveFilter] = useState<InvoiceFilter>('all');
-
-    if (!profile) return null;
 
     const visibleClients = useMemo(
         () => getVisibleClientsForUser(clientsData ?? [], profile),
@@ -97,17 +107,6 @@ export default function BillingPage() {
             || clientName.includes(q)
         );
     });
-
-    if (!canAccessBilling(profile)) {
-        return (
-            <div className="p-8">
-                <div className="card p-6 max-w-xl">
-                    <h1 className="text-xl font-bold text-text-primary mb-2">Немає доступу</h1>
-                    <p className="text-sm text-text-muted">Ви не маєте прав для перегляду оплат.</p>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="p-6">

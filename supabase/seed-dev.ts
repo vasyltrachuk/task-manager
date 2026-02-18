@@ -1,5 +1,5 @@
 /**
- * Dev seed script — populates remote Supabase with data matching mock-data.ts
+ * Dev seed script — populates remote Supabase with baseline demo data
  *
  * Usage:  npx tsx supabase/seed-dev.ts
  *

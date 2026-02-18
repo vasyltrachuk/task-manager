@@ -35,6 +35,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { cn, formatDate, getInitials, isOverdue, formatMoneyUAH } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
+import { getDefaultClientAccountantId, getFirstActiveAccountantId } from '@/lib/client-accountants';
 import {
     calculateClientBillingSnapshot,
     formatMinorMoneyUAH,
@@ -58,6 +59,7 @@ import {
 import TaskFormModal from '@/components/tasks/task-form-modal';
 import LicenseFormModal from '@/components/licenses/license-form-modal';
 import DpsIntegrationPanel from '@/components/clients/dps-integration-panel';
+import AccessDeniedCard from '@/components/ui/access-denied-card';
 import {
     canCreateTask,
     canManageLicenses,
@@ -302,8 +304,7 @@ export default function ClientProfilePage() {
 
     const defaultAssigneeId = profile && isAccountant(profile)
         ? profile.id
-        : client?.accountants?.[0]?.id
-        || profiles.find((row) => row.role === 'accountant' && row.is_active)?.id;
+        : getDefaultClientAccountantId(client) || getFirstActiveAccountantId(profiles);
 
     const handlePlanRegistryCheck = () => {
         if (!canManageLicense) return;
@@ -382,22 +383,21 @@ export default function ClientProfilePage() {
     }
 
     if (!canViewClient(profile, client)) {
+        const action = (
+            <button
+                onClick={() => router.push(backToClientsHref)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700 transition-colors"
+            >
+                <ArrowLeft size={16} />
+                Повернутись до клієнтів
+            </button>
+        );
+
         return (
-            <div className="p-8">
-                <div className="card p-6 max-w-xl">
-                    <h1 className="text-xl font-bold text-text-primary mb-2">Немає доступу</h1>
-                    <p className="text-sm text-text-muted mb-5">
-                        Ви не можете переглядати цього клієнта.
-                    </p>
-                    <button
-                        onClick={() => router.push(backToClientsHref)}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700 transition-colors"
-                    >
-                        <ArrowLeft size={16} />
-                        Повернутись до клієнтів
-                    </button>
-                </div>
-            </div>
+            <AccessDeniedCard
+                message="Ви не можете переглядати цього клієнта."
+                action={action}
+            />
         );
     }
 
@@ -456,7 +456,7 @@ export default function ClientProfilePage() {
                             className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold transition-colors"
                         >
                             <Plus size={15} />
-                            Нове завдання
+                            Додати завдання
                         </button>
                     )}
                     {canManageLicense && (

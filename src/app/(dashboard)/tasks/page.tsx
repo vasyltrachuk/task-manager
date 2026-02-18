@@ -264,7 +264,7 @@ export default function TaskBoardPage() {
                             className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700 transition-colors shadow-sm"
                         >
                             <Plus size={16} />
-                            Нове завдання
+                            Додати завдання
                         </button>
                     )}
                 </div>

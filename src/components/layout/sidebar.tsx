@@ -21,7 +21,6 @@ import { cn, getInitials } from '@/lib/utils';
 import { USER_ROLE_LABELS } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
-import { useProfiles } from '@/lib/hooks/use-profiles';
 import { isAdmin, getVisibleTasksForUser } from '@/lib/rbac';
 
 interface NavItem {
@@ -95,7 +94,6 @@ export default function Sidebar() {
     const pathname = usePathname();
     const { profile, signOut } = useAuth();
     const { data: tasks } = useTasks();
-    const { data: profiles } = useProfiles();
     const [isExpanded, setIsExpanded] = useState(false);
     const tooltipRef = useRef<HTMLDivElement>(null);
     const [tooltip, setTooltip] = useState<Tooltip>({
@@ -104,14 +102,13 @@ export default function Sidebar() {
         visible: false,
     });
 
-    if (!profile) return null;
-
-    const isCurrentUserAdmin = isAdmin(profile!);
+    const isCurrentUserAdmin = profile ? isAdmin(profile) : false;
 
     const navItems = useMemo(() => {
+        if (!profile) return [];
         const base = isCurrentUserAdmin ? adminNavItems : accountantNavItems;
         if (isCurrentUserAdmin) return base;
-        const todoCount = getVisibleTasksForUser(tasks ?? [], profile!)
+        const todoCount = getVisibleTasksForUser(tasks ?? [], profile)
             .filter(t => t.status === 'todo').length;
         if (todoCount === 0) return base;
         return base.map(item =>
@@ -157,6 +154,8 @@ export default function Sidebar() {
     const hideTooltip = useCallback(() => {
         setTooltip(prev => (prev.visible ? { ...prev, visible: false } : prev));
     }, []);
+
+    if (!profile) return null;
 
     return (
         <>

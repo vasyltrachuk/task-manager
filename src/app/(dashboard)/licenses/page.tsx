@@ -30,6 +30,7 @@ import { cn, formatDate, getInitials } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import ViewModeToggle from '@/components/ui/view-mode-toggle';
 import LicenseFormModal from '@/components/licenses/license-form-modal';
+import AccessDeniedCard from '@/components/ui/access-denied-card';
 import { canManageLicenses } from '@/lib/rbac';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -254,6 +255,16 @@ function LicenseCard({
 
 export default function LicensesPage() {
     const { profile } = useAuth();
+    if (!profile) return null;
+
+    if (!canManageLicenses(profile)) {
+        return <AccessDeniedCard message="Контроль ліцензій доступний лише адміністратору." />;
+    }
+
+    return <LicensesPageContent />;
+}
+
+function LicensesPageContent() {
     const { data: licenses } = useLicenses();
     const { data: clients } = useClients();
     const { data: profiles } = useProfiles();
@@ -265,10 +276,6 @@ export default function LicensesPage() {
     const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingLicense, setEditingLicense] = useState<License | null>(null);
-
-    if (!profile) return null;
-
-    const canManage = canManageLicenses(profile!);
 
     const licenseRows = useMemo(() => {
         return (licenses ?? []).map((license) => ({
@@ -381,17 +388,6 @@ export default function LicensesPage() {
         alert('Завдання контролю створено у розділі "Завдання".');
     };
 
-    if (!canManage) {
-        return (
-            <div className="p-8">
-                <div className="card p-6 max-w-xl">
-                    <h1 className="text-xl font-bold text-text-primary mb-2">Немає доступу</h1>
-                    <p className="text-sm text-text-muted">Контроль ліцензій доступний лише адміністратору.</p>
-                </div>
-            </div>
-        );
-    }
-
     return (
         <div className="p-6">
             <div className="flex items-center justify-between mb-6">
@@ -414,7 +410,7 @@ export default function LicensesPage() {
                     className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700 transition-colors shadow-sm"
                 >
                     <Plus size={16} />
-                    Нова ліцензія
+                    Додати ліцензію
                 </button>
             </div>
 

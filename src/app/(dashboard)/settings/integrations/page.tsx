@@ -5,6 +5,7 @@ import { KeyRound, RefreshCw, Save, ShieldAlert, Trash2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { canAccessIntegrations } from '@/lib/rbac';
 import { cn, formatDate } from '@/lib/utils';
+import AccessDeniedCard from '@/components/ui/access-denied-card';
 
 interface DpsTokenStatus {
     hasToken: boolean;
@@ -42,6 +43,18 @@ function getRunStatusLabel(status: string): string {
 
 export default function IntegrationsSettingsPage() {
     const { profile } = useAuth();
+    if (!profile) {
+        return null;
+    }
+
+    if (!canAccessIntegrations(profile)) {
+        return <AccessDeniedCard message="Розділ інтеграцій доступний адміністратору або бухгалтеру." />;
+    }
+
+    return <IntegrationsSettingsContent />;
+}
+
+function IntegrationsSettingsContent() {
     const [tokenInput, setTokenInput] = useState('');
     const [tokenStatus, setTokenStatus] = useState<DpsTokenStatus | null>(null);
     const [recentRuns, setRecentRuns] = useState<DpsRun[]>([]);
@@ -50,12 +63,6 @@ export default function IntegrationsSettingsPage() {
     const [syncing, setSyncing] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-    if (!profile) {
-        return null;
-    }
-
-    const canAccess = canAccessIntegrations(profile!);
 
     const loadData = useCallback(async () => {
         try {
@@ -82,9 +89,8 @@ export default function IntegrationsSettingsPage() {
     }, []);
 
     useEffect(() => {
-        if (!canAccess) return;
         void loadData();
-    }, [canAccess, loadData]);
+    }, [loadData]);
 
     const hasToken = Boolean(tokenStatus?.hasToken);
     const tokenUpdatedAt = tokenStatus?.updatedAt;
@@ -181,17 +187,6 @@ export default function IntegrationsSettingsPage() {
             setSyncing(false);
         }
     };
-
-    if (!canAccess) {
-        return (
-            <div className="p-8">
-                <div className="card p-6 max-w-xl">
-                    <h1 className="text-xl font-bold text-text-primary mb-2">Немає доступу</h1>
-                    <p className="text-sm text-text-muted">Розділ інтеграцій доступний адміністратору або бухгалтеру.</p>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="p-6 max-w-5xl space-y-6">

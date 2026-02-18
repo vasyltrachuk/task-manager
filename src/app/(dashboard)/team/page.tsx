@@ -7,7 +7,6 @@ import {
     ChevronLeft,
     ChevronRight,
     UserPlus,
-    Check,
     MoreVertical,
     UserX,
     Pencil,
@@ -20,6 +19,7 @@ import { useTasks } from '@/lib/hooks/use-tasks';
 import { Profile } from '@/lib/types';
 import { cn, getInitials, formatDate } from '@/lib/utils';
 import AccountantFormModal from '@/components/team/accountant-form-modal';
+import AccessDeniedCard from '@/components/ui/access-denied-card';
 import { canManageTeam } from '@/lib/rbac';
 
 const DAYS_OF_WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
@@ -71,22 +71,13 @@ export default function TeamLoadPage() {
     const [editProfile, setEditProfile] = useState<Profile | null>(null);
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
-    const [copiedField, setCopiedField] = useState<string | null>(null);
-
     if (!profile) return null;
 
-    const canManage = canManageTeam(profile!);
+    const canManage = canManageTeam(profile);
     const accountants = (profiles ?? []).filter((p: Profile) => p.role === 'accountant');
 
     if (!canManage) {
-        return (
-            <div className="p-8">
-                <div className="card p-6 max-w-xl">
-                    <h1 className="text-xl font-bold text-text-primary mb-2">Немає доступу</h1>
-                    <p className="text-sm text-text-muted">Розділ команди доступний лише адміністратору.</p>
-                </div>
-            </div>
-        );
+        return <AccessDeniedCard message="Розділ команди доступний лише адміністратору." />;
     }
 
     const dateRangeStr = `${weekDays[0].toLocaleDateString('uk-UA', { month: 'short', day: 'numeric' })} - ${weekDays[6].toLocaleDateString('uk-UA', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -96,12 +87,6 @@ export default function TeamLoadPage() {
         return a.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             a.phone.includes(searchQuery);
     });
-
-    const handleCopy = async (text: string, field: string) => {
-        await navigator.clipboard.writeText(text);
-        setCopiedField(field);
-        setTimeout(() => setCopiedField(null), 2000);
-    };
 
     const handleEdit = (profile: Profile) => {
         setEditProfile(profile);
@@ -164,7 +149,7 @@ export default function TeamLoadPage() {
                             className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm"
                         >
                             <UserPlus size={16} />
-                            Створити бухгалтера
+                            Додати бухгалтера
                         </button>
                     )}
                 </div>

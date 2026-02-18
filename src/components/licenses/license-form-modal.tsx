@@ -205,7 +205,7 @@ export default function LicenseFormModal({
                             </div>
                             <div>
                                 <h2 className="text-lg font-bold text-text-primary">
-                                    {editLicense ? 'Редагувати ліцензію' : 'Нова ліцензія'}
+                                    {editLicense ? 'Редагувати ліцензію' : 'Додати ліцензію'}
                                 </h2>
                                 <p className="text-xs text-text-muted">
                                     Контроль строків, оплат і звірок по реєстрах

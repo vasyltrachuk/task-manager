@@ -19,6 +19,7 @@ import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import { getVisibleClientsForUser, isAccountant, isAdmin } from '@/lib/rbac';
+import { getDefaultClientAccountantId } from '@/lib/client-accountants';
 import { useClients } from '@/lib/hooks/use-clients';
 import { useProfiles } from '@/lib/hooks/use-profiles';
 import { useCreateTask, useUpdateTask } from '@/lib/hooks/use-tasks';
@@ -103,18 +104,10 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
     const isAdminUser = profile ? isAdmin(profile) : false;
     const isAccountantUser = profile ? isAccountant(profile) : false;
 
-    const resolveDefaultAssigneeForClient = (clientId: string): string => {
+    const resolveDefaultAssigneeForClient = useCallback((clientId: string): string => {
         const client = clients.find((item) => item.id === clientId);
-        if (!client?.accountants?.length) return '';
-
-        const responsible = client.accountants.find((accountant) =>
-            profiles.some((row) =>
-                row.id === accountant.id && row.role === 'accountant' && row.is_active
-            )
-        );
-
-        return responsible?.id || '';
-    };
+        return getDefaultClientAccountantId(client);
+    }, [clients]);
 
     const initialAssigneeId = editTask?.assignee_id
         || (isAccountantUser
@@ -170,10 +163,6 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
         () => activeClients.find(c => c.id === formData.client_id),
         [activeClients, formData.client_id]
     );
-    const selectedAssignee = useMemo(
-        () => assignees.find(a => a.id === formData.assignee_id),
-        [assignees, formData.assignee_id]
-    );
 
     const matchedClients = useMemo(() => {
         if (!normalizedClientQuery) return activeClients;
@@ -206,19 +195,19 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
     );
     const hasHiddenMatchedAssignees = matchedAssignees.length > visibleAssignees.length;
     const isAdminCreatingTask = !editTask && isAdminUser;
-
-    const getDefaultAssigneeForClient = useCallback((clientId: string): string => {
-        const client = clients.find((c) => c.id === clientId);
-        if (!client?.accountants?.length) return '';
-
-        const firstResponsible = client.accountants.find((accountant) =>
-            profiles.some((row) =>
-                row.id === accountant.id && row.role === 'accountant' && row.is_active
-            )
-        );
-
-        return firstResponsible?.id || '';
-    }, [clients, profiles]);
+    const fallbackAssigneeId = useMemo(
+        () => (
+            isAdminCreatingTask && formData.client_id
+                ? resolveDefaultAssigneeForClient(formData.client_id)
+                : ''
+        ),
+        [formData.client_id, isAdminCreatingTask, resolveDefaultAssigneeForClient]
+    );
+    const effectiveAssigneeId = formData.assignee_id || fallbackAssigneeId;
+    const selectedAssignee = useMemo(
+        () => assignees.find((assignee) => assignee.id === effectiveAssigneeId),
+        [assignees, effectiveAssigneeId]
+    );
 
     useEffect(() => {
         if (!isClientDropdownOpen) return;
@@ -262,7 +251,7 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
 
     const handleClientSelect = (clientId: string) => {
         const nextAssigneeId = isAdminCreatingTask
-            ? getDefaultAssigneeForClient(clientId)
+            ? resolveDefaultAssigneeForClient(clientId)
             : isAccountantUser
                 ? (profile?.id ?? '')
                 : undefined;
@@ -302,7 +291,7 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
         const e: Record<string, string> = {};
         if (!formData.title.trim()) e.title = "Обов'язкове поле";
         if (!formData.client_id) e.client_id = "Оберіть клієнта";
-        if (!isAccountantUser && !formData.assignee_id) e.assignee_id = "Оберіть виконавця";
+        if (!isAccountantUser && !effectiveAssigneeId) e.assignee_id = "Оберіть виконавця";
         if (!formData.due_date) e.due_date = "Встановіть дату найближчого виконання";
         if (formData.recurrence === 'semi_monthly') {
             if (formData.recurrence_days.length !== 2) {
@@ -360,7 +349,7 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
         if (!profile) return;
         if (!validate()) return;
 
-        const resolvedAssigneeId = isAccountantUser ? profile.id : formData.assignee_id;
+        const resolvedAssigneeId = isAccountantUser ? profile.id : effectiveAssigneeId;
         const dueDate = formData.due_date.includes('T')
             ? formData.due_date.slice(0, 10)
             : formData.due_date;
@@ -408,7 +397,7 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
                             </div>
                             <div>
                                 <h2 className="text-lg font-bold text-text-primary">
-                                    {editTask ? 'Редагувати завдання' : 'Нове завдання'}
+                                    {editTask ? 'Редагувати завдання' : 'Додати завдання'}
                                 </h2>
                                 <p className="text-xs text-text-muted">
                                     {editTask ? 'Оновити параметри завдання' : 'Створіть нове завдання для клієнта'}
@@ -604,14 +593,14 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
                                                     onClick={() => handleAssigneeSelect(assignee.id)}
                                                     className={cn(
                                                         'w-full text-left px-3 py-2 rounded-md border transition-colors',
-                                                        formData.assignee_id === assignee.id
+                                                        effectiveAssigneeId === assignee.id
                                                             ? 'border-brand-200 bg-brand-50/70'
                                                             : 'border-transparent hover:border-surface-200 hover:bg-surface-50'
                                                     )}
                                                 >
                                                     <div className="flex items-center justify-between gap-2">
                                                         <span className="text-sm font-medium text-text-primary truncate">{assignee.full_name}</span>
-                                                        {formData.assignee_id === assignee.id && (
+                                                        {effectiveAssigneeId === assignee.id && (
                                                             <Check size={14} className="text-brand-600 flex-shrink-0" />
                                                         )}
                                                     </div>

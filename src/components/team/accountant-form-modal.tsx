@@ -12,6 +12,8 @@ import {
     Eye,
     EyeOff,
     ShieldCheck,
+    AlertCircle,
+    Loader2,
 } from 'lucide-react';
 import { Profile } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -40,8 +42,27 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
     } | null>(null);
     const [copiedField, setCopiedField] = useState<string | null>(null);
     const [showPassword, setShowPassword] = useState(false);
+    const [submitError, setSubmitError] = useState<string | null>(null);
 
     if (!isOpen) return null;
+
+    const getMutationErrorMessage = (error: unknown): string => {
+        const message = error instanceof Error ? error.message : '';
+
+        if (message === 'UNAUTHENTICATED') {
+            return 'Сесія завершилась. Оновіть сторінку та увійдіть повторно.';
+        }
+
+        if (message === 'PROFILE_NOT_FOUND') {
+            return 'Не вдалося знайти ваш профіль. Зверніться до адміністратора.';
+        }
+
+        if (/already registered|already been registered|duplicate key/i.test(message)) {
+            return 'Користувач з таким email вже існує.';
+        }
+
+        return message || 'Не вдалося зберегти зміни. Спробуйте ще раз.';
+    };
 
     const validate = () => {
         const errs: Record<string, string> = {};
@@ -56,15 +77,20 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
 
     const handleSubmit = async () => {
         if (!validate()) return;
+        setSubmitError(null);
 
         if (editProfile) {
-            updateProfileMutation.mutate({
-                ...editProfile,
-                full_name: fullName.trim(),
-                phone: phone.trim(),
-                email: email.trim() || undefined,
-            });
-            onClose();
+            try {
+                await updateProfileMutation.mutateAsync({
+                    ...editProfile,
+                    full_name: fullName.trim(),
+                    phone: phone.trim(),
+                    email: email.trim() || undefined,
+                });
+                onClose();
+            } catch (error) {
+                setSubmitError(getMutationErrorMessage(error));
+            }
         } else {
             const phoneToUse = phone.trim();
             try {
@@ -79,8 +105,8 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                     password: result.generated_password || '',
                     name: fullName.trim(),
                 });
-            } catch {
-                // Validation and API errors are surfaced by mutation boundaries/logs.
+            } catch (error) {
+                setSubmitError(getMutationErrorMessage(error));
             }
         }
     };
@@ -105,9 +131,12 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
         setPhone('');
         setEmail('');
         setErrors({});
+        setSubmitError(null);
         setShowPassword(false);
         onClose();
     };
+
+    const isSubmitting = createProfileMutation.isPending || updateProfileMutation.isPending;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -126,7 +155,7 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                                     ? 'Дані для входу'
                                     : editProfile
                                         ? 'Редагувати бухгалтера'
-                                        : 'Новий бухгалтер'
+                                        : 'Додати бухгалтера'
                                 }
                             </h2>
                             <p className="text-xs text-text-muted">
@@ -239,11 +268,18 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                     ) : (
                         /* ===== Form Screen ===== */
                         <div className="space-y-5">
+                            {submitError && (
+                                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 flex items-start gap-2.5">
+                                    <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+                                    <p>{submitError}</p>
+                                </div>
+                            )}
+
                             {/* Full Name */}
                             <div>
                                 <label className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-2 flex items-center gap-1.5">
                                     <User size={12} />
-                                    Повне ім&#39;я *
+                                    ПІБ *
                                 </label>
                                 <input
                                     type="text"
@@ -331,10 +367,13 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                             </button>
                             <button
                                 onClick={handleSubmit}
+                                disabled={isSubmitting}
                                 className="flex items-center gap-2 px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
                             >
-                                <Key size={16} />
-                                {editProfile ? 'Зберегти' : 'Створити та згенерувати пароль'}
+                                {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : <Key size={16} />}
+                                {isSubmitting
+                                    ? editProfile ? 'Збереження...' : 'Створення...'
+                                    : editProfile ? 'Зберегти' : 'Створити та згенерувати пароль'}
                             </button>
                         </>
                     )}

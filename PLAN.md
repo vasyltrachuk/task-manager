@@ -10,7 +10,7 @@
   - Клієнт пише в Telegram-бот своєї бухгалтерської компанії.
   - Бухгалтер та адмін бачать чат з клієнтами у веб-дашборді.
   - Клієнт надсилає документи через бот — бухгалтер прикріпляє їх до задач.
-- **Поточний стан**: Next.js App Router з готовими UI-екранами (clients/tasks/team/billing/licenses/settings), дані — mock-store. Supabase залежності є, але не інтегровані.
+- **Поточний стан**: Next.js App Router з готовими UI-екранами (clients/tasks/team/billing/licenses/settings), дані та CRUD працюють через Supabase + React Query.
 
 ### 1.1 SaaS access lifecycle (обов'язково для prod)
 
@@ -779,7 +779,7 @@ export async function POST(req: Request, { params }: { params: { botPublicId: st
 
 ### Фаза 1: Перехід з mock-store на Supabase
 
-- Замінити `src/lib/mock-data.ts` + `store.tsx` на Supabase repos.
+- ✅ Виконано: `src/lib/mock-data.ts` + `store.tsx` видалені, UI працює через Supabase repos/hooks.
 - React Query для data fetching.
 - Всі існуючі екрани працюють з реальною БД.
 - RBAC через RLS замість клієнтських перевірок.
