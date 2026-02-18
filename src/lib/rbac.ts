@@ -24,6 +24,10 @@ export function canManageSettings(user: Profile): boolean {
     return isAdmin(user);
 }
 
+export function canAccessIntegrations(user: Profile): boolean {
+    return isAdmin(user) || isAccountant(user);
+}
+
 export function canAccessBilling(user: Profile): boolean {
     return isAdmin(user) || isAccountant(user);
 }

@@ -1,12 +1,13 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Bell, Shield, Database, Palette, SlidersHorizontal, Save } from 'lucide-react';
+import Link from 'next/link';
+import { Bell, Shield, Database, Palette, SlidersHorizontal, Save, Plug } from 'lucide-react';
 import { useApp } from '@/lib/store';
 import { TaxRulebookConfig } from '@/lib/types';
 import { calculateIncomeLimitByTaxSystem } from '@/lib/tax';
 import { cn, formatMoneyUAH } from '@/lib/utils';
-import { canManageSettings } from '@/lib/rbac';
+import { canAccessIntegrations, canManageSettings } from '@/lib/rbac';
 
 function isRulebookValid(rulebook: TaxRulebookConfig): boolean {
     return (
@@ -23,6 +24,7 @@ function isRulebookValid(rulebook: TaxRulebookConfig): boolean {
 export default function SettingsPage() {
     const { state, updateTaxRulebook } = useApp();
     const canManage = canManageSettings(state.currentUser);
+    const canOpenIntegrations = canAccessIntegrations(state.currentUser);
     const [form, setForm] = useState<TaxRulebookConfig>(state.taxRulebook);
 
     const calculatedLimits = useMemo(() => {
@@ -62,7 +64,17 @@ export default function SettingsPage() {
             <div className="p-8">
                 <div className="card p-6 max-w-xl">
                     <h1 className="text-xl font-bold text-text-primary mb-2">Немає доступу</h1>
-                    <p className="text-sm text-text-muted">Налаштування доступні лише адміністратору.</p>
+                    <p className="text-sm text-text-muted">
+                        Налаштування податкового rulebook доступні лише адміністратору.
+                    </p>
+                    {canOpenIntegrations && (
+                        <Link
+                            href="/settings/integrations"
+                            className="inline-flex mt-4 items-center gap-1.5 px-4 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold transition-colors"
+                        >
+                            Відкрити інтеграції
+                        </Link>
+                    )}
                 </div>
             </div>
         );
@@ -229,6 +241,18 @@ export default function SettingsPage() {
                     </div>
                 </div>
             </div>
+
+            <Link href="/settings/integrations" className="card p-5 flex items-center gap-4 hover:border-brand-300 transition-colors">
+                <div className="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center text-brand-600">
+                    <Plug size={20} />
+                </div>
+                <div className="flex-1">
+                    <h3 className="text-sm font-semibold text-text-primary">Інтеграції</h3>
+                    <p className="text-xs text-text-muted">
+                        ДПС: персональні токени бухгалтерів, sync відкритих реєстрів і КЕП-профілі клієнтів.
+                    </p>
+                </div>
+            </Link>
 
             <div className="space-y-4">
                 {[

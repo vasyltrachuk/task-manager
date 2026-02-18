@@ -12,6 +12,7 @@ import {
     Wallet,
     BarChart3,
     Settings,
+    Plug,
     ChevronDown,
     Check,
     PanelLeftOpen,
@@ -46,6 +47,11 @@ const accountantNavItems: NavItem[] = [
 
 const adminSettingsItems = [
     { href: '/settings', label: 'Налаштування', icon: Settings },
+    { href: '/settings/integrations', label: 'Інтеграції', icon: Plug },
+];
+
+const accountantSettingsItems = [
+    { href: '/settings/integrations', label: 'Інтеграції', icon: Plug },
 ];
 
 interface Tooltip {
@@ -108,7 +114,7 @@ export default function Sidebar() {
             item.href === '/tasks' ? { ...item, badge: todoCount } : item
         );
     }, [isCurrentUserAdmin, state.tasks, currentUser]);
-    const settingsItems = isCurrentUserAdmin ? adminSettingsItems : [];
+    const settingsItems = isCurrentUserAdmin ? adminSettingsItems : accountantSettingsItems;
     const switchableProfiles = useMemo(
         () => state.profiles.filter((profile) =>
             profile.is_active && (profile.role === 'admin' || profile.role === 'accountant')
@@ -209,7 +215,9 @@ export default function Sidebar() {
                     {settingsItems.length > 0 && (
                         <div className="pt-3 mt-3 border-t border-surface-200">
                             {settingsItems.map((item) => {
-                                const isActive = pathname.startsWith(item.href);
+                                const isActive = item.href === '/settings'
+                                    ? pathname === '/settings'
+                                    : pathname.startsWith(item.href);
                                 return (
                                     <Link
                                         key={item.href}

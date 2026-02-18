@@ -253,7 +253,7 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
             ? getDefaultAssigneeForClient(clientId)
             : isAccountantUser
                 ? state.currentUser.id
-            : undefined;
+                : undefined;
 
         setFormData((prev) => ({
             ...prev,
@@ -487,7 +487,7 @@ export default function TaskFormModal({ isOpen, onClose, editTask, defaultClient
                                                         setClientSearchQuery('');
                                                     }
                                                 }}
-                                                placeholder="Пошук за назвою, типом, ІПН або ЄДРПОУ..."
+                                                placeholder="Пошук за назвою, типом, РНОКПП або ЄДРПОУ..."
                                                 className="w-full pl-8 pr-3 py-2 bg-white border border-surface-200 rounded-md text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-brand-200"
                                             />
                                         </div>

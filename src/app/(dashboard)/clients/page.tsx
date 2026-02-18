@@ -435,7 +435,7 @@ function ClientsPageContent() {
                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
                         <input
                             type="text"
-                            placeholder="Пошук за назвою, ІПН або ЄДРПОУ..."
+                            placeholder="Пошук за назвою, РНОКПП або ЄДРПОУ..."
                             value={searchQuery}
                             onChange={(e) => {
                                 const nextSearchQuery = e.target.value;

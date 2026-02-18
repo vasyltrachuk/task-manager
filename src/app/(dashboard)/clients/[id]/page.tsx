@@ -55,6 +55,7 @@ import {
 } from '@/lib/tax-profile';
 import TaskFormModal from '@/components/tasks/task-form-modal';
 import LicenseFormModal from '@/components/licenses/license-form-modal';
+import DpsIntegrationPanel from '@/components/clients/dps-integration-panel';
 import {
     canCreateTask,
     canManageLicenses,
@@ -495,6 +496,8 @@ export default function ClientProfilePage() {
                             </div>
                         </div>
                     )}
+
+                    <DpsIntegrationPanel clientId={client.id} clientTaxId={client.tax_id} />
 
                     {taxProfile && (
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">

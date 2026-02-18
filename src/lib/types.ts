@@ -273,6 +273,37 @@ export interface TaxRulebookConfig {
   vat_registration_threshold: number;
 }
 
+export type DpsRegistryCode = 'ev' | 'pdv_act' | 'non-profit';
+export type DpsSnapshotStatus = 'ok' | 'not_found' | 'error' | 'stale';
+export type DpsSyncRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'skipped_no_token';
+
+export interface DpsTokenStatus {
+  hasToken: boolean;
+  maskedToken: string | null;
+  lastUsedAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface DpsRegistrySnapshot {
+  registry_code: DpsRegistryCode;
+  status: DpsSnapshotStatus;
+  normalized_payload: Record<string, unknown>;
+  raw_payload: unknown;
+  source: 'manual' | 'daily' | 'cron';
+  fetched_at: string;
+  expires_at: string;
+}
+
+export interface DpsKepProfile {
+  key_owner_name: string;
+  key_owner_tax_id: string;
+  cert_subject?: string | null;
+  cert_issuer?: string | null;
+  cert_serial?: string | null;
+  cert_valid_to?: string | null;
+  notes?: string | null;
+}
+
 // ========== UI Helpers ==========
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   todo: 'Нова',
@@ -345,7 +376,7 @@ export const CLIENT_TYPE_LABELS: Record<ClientType, string> = {
 };
 
 export const CLIENT_TAX_ID_TYPE_LABELS: Record<ClientTaxIdType, string> = {
-  ipn: 'ІПН',
+  ipn: 'РНОКПП',
   edrpou: 'ЄДРПОУ',
 };
 
