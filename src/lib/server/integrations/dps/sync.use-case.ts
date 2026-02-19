@@ -3,7 +3,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TenantContext } from '@/lib/server/tenant-context';
 import {
-  DPS_REGISTRY_CODES,
+  DPS_SYNC_REGISTRY_CODES,
   type DpsRegistryCode,
   type DpsSyncSource,
   type DpsSyncSummary,
@@ -100,7 +100,7 @@ async function getTargetClients(db: SupabaseClient, input: RunDpsSyncInput): Pro
 
 export async function runDpsSync(db: SupabaseClient, input: RunDpsSyncInput): Promise<DpsSyncSummary> {
   const ctx = { tenantId: input.tenantId } as TenantContext;
-  const registries = input.registries?.length ? input.registries : [...DPS_REGISTRY_CODES];
+  const registries = input.registries?.length ? input.registries : [...DPS_SYNC_REGISTRY_CODES];
   const source = input.source;
   const force = Boolean(input.force);
 

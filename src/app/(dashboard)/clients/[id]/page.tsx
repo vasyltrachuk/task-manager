@@ -12,11 +12,15 @@ import {
     Building2,
     Clock3,
     FileText,
+    Download,
+    Link2,
+    MessageSquare,
     History,
     CheckCircle2,
     Wallet,
 } from 'lucide-react';
 import {
+    ClientDocument,
     License,
     TASK_STATUS_LABELS,
     TASK_TYPE_LABELS,
@@ -58,6 +62,7 @@ import {
 } from '@/lib/tax-profile';
 import TaskFormModal from '@/components/tasks/task-form-modal';
 import LicenseFormModal from '@/components/licenses/license-form-modal';
+import LinkDocumentToTaskModal from '@/components/documents/link-document-to-task-modal';
 import DpsIntegrationPanel from '@/components/clients/dps-integration-panel';
 import AccessDeniedCard from '@/components/ui/access-denied-card';
 import {
@@ -71,11 +76,14 @@ import { useClient } from '@/lib/hooks/use-clients';
 import { useProfiles } from '@/lib/hooks/use-profiles';
 import { useLicensesByClient } from '@/lib/hooks/use-licenses';
 import { useTasksByClient, useCreateTask } from '@/lib/hooks/use-tasks';
+import { useClientDocuments } from '@/lib/hooks/use-documents';
+import { useConversations } from '@/lib/hooks/use-conversations';
 import { useInvoices, usePayments } from '@/lib/hooks/use-billing';
 import { useActivityLogByTasks } from '@/lib/hooks/use-activity-log';
 import { useTaxRulebook } from '@/lib/hooks/use-tax-rulebook';
+import ChatView from '@/components/inbox/chat-view';
 
-type TabKey = 'overview' | 'licenses' | 'billing' | 'tasks' | 'documents' | 'history';
+type TabKey = 'overview' | 'licenses' | 'billing' | 'tasks' | 'chat' | 'documents' | 'history';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -133,6 +141,13 @@ function formatDaysLeft(daysLeft?: number): string {
     return `через ${daysLeft} дн`;
 }
 
+function formatFileSize(bytes?: number | null): string {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function ClientProfilePage() {
     const { profile } = useAuth();
     const router = useRouter();
@@ -143,6 +158,9 @@ export default function ClientProfilePage() {
     const { data: profilesData } = useProfiles();
     const { data: licensesData } = useLicensesByClient(clientId);
     const { data: tasksData } = useTasksByClient(clientId);
+    const { data: clientDocumentsData, isLoading: isDocumentsLoading } = useClientDocuments(clientId);
+    const conversationFilters = useMemo(() => ({ clientId }), [clientId]);
+    const { data: clientConversationsData, isLoading: isClientConversationsLoading } = useConversations(conversationFilters);
     const { data: invoicesData } = useInvoices();
     const { data: paymentsData } = usePayments();
     const { data: taxRulebook } = useTaxRulebook();
@@ -151,6 +169,7 @@ export default function ClientProfilePage() {
     const [activeTab, setActiveTab] = useState<TabKey>('overview');
     const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
     const [isLicenseFormOpen, setIsLicenseFormOpen] = useState(false);
+    const [selectedDocument, setSelectedDocument] = useState<ClientDocument | null>(null);
 
     const profiles = profilesData ?? [];
     const canCreateTaskForUser = profile ? canCreateTask(profile) : false;
@@ -247,13 +266,12 @@ export default function ClientProfilePage() {
         );
     });
 
-    const documents = tasks.flatMap((task) =>
-        (task.files || []).map((file) => ({
-            ...file,
-            taskTitle: task.title,
-            taskId: task.id,
-        }))
-    );
+    const documents = clientDocumentsData ?? [];
+    const clientConversations = clientConversationsData ?? [];
+    const clientConversationId = useMemo(() => {
+        const openConversation = clientConversations.find((conversation) => conversation.status === 'open');
+        return openConversation?.id ?? clientConversations[0]?.id ?? null;
+    }, [clientConversations]);
 
     const historyEvents = useMemo(() => {
         if (!client) return [] as { id: string; title: string; details?: string; created_at: string; tone?: 'normal' | 'warning' }[];
@@ -350,6 +368,16 @@ export default function ClientProfilePage() {
         alert('Задачу звірки створено у розділі "Завдання".');
     };
 
+    const handleDownloadDocument = (doc: ClientDocument) => {
+        const anchor = window.document.createElement('a');
+        anchor.href = `/api/documents/download?path=${encodeURIComponent(doc.storage_path)}`;
+        anchor.download = doc.file_name;
+        anchor.rel = 'noopener noreferrer';
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+    };
+
     if (!profile) return null;
 
     if (isClientLoading) {
@@ -423,6 +451,7 @@ export default function ClientProfilePage() {
         ...(canManageLicense ? [{ key: 'licenses' as TabKey, label: 'Ліцензії', count: licenses.length }] : []),
         { key: 'billing', label: 'Оплати', count: billingSnapshot.open_invoices },
         { key: 'tasks', label: 'Завдання', count: activeTasks.length },
+        { key: 'chat', label: 'Чат', count: clientConversations.length },
         { key: 'documents', label: 'Документи', count: documents.length },
         { key: 'history', label: 'Історія', count: historyEvents.length },
     ];
@@ -997,6 +1026,28 @@ export default function ClientProfilePage() {
                 </div>
             )}
 
+            {activeTab === 'chat' && (
+                <div className="card overflow-hidden h-[70vh] min-h-[520px] flex">
+                    {isClientConversationsLoading ? (
+                        <div className="flex-1 flex items-center justify-center text-text-muted">
+                            <div className="text-center">
+                                <MessageSquare size={28} className="mx-auto mb-2 opacity-40" />
+                                <p className="text-sm">Завантаження чату...</p>
+                            </div>
+                        </div>
+                    ) : clientConversationId ? (
+                        <ChatView conversationId={clientConversationId} />
+                    ) : (
+                        <div className="flex-1 flex items-center justify-center text-text-muted bg-surface-50">
+                            <div className="text-center px-6">
+                                <MessageSquare size={32} className="mx-auto mb-2 opacity-40" />
+                                <p className="text-sm">Для цього клієнта ще немає бесіди в Telegram.</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {activeTab === 'documents' && (
                 <div className="card p-5">
                     <h2 className="text-sm font-bold text-text-primary uppercase tracking-wide mb-4 flex items-center gap-2">
@@ -1004,23 +1055,52 @@ export default function ClientProfilePage() {
                         Документи клієнта
                     </h2>
 
-                    {documents.length > 0 ? (
+                    {isDocumentsLoading && (
+                        <p className="text-sm text-text-muted py-10 text-center">Завантаження документів...</p>
+                    )}
+
+                    {!isDocumentsLoading && documents.length > 0 ? (
                         <div className="space-y-2">
                             {documents.map((doc) => (
                                 <div key={doc.id} className="p-3 rounded-lg border border-surface-200 bg-white flex items-center justify-between gap-3">
                                     <div className="min-w-0">
-                                        <p className="text-sm font-medium text-text-primary truncate">{doc.file_name}</p>
-                                        <p className="text-xs text-text-muted truncate">{doc.taskId} • {doc.taskTitle}</p>
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <p className="text-sm font-medium text-text-primary truncate">{doc.file_name}</p>
+                                            {doc.doc_type && (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-100 text-text-muted">
+                                                    {doc.doc_type}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-text-muted truncate">
+                                            {formatDate(doc.created_at)}
+                                            {doc.size_bytes ? ` • ${formatFileSize(doc.size_bytes)}` : ''}
+                                        </p>
                                     </div>
-                                    <span className="text-xs text-text-muted whitespace-nowrap">{formatDate(doc.created_at)}</span>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                        <button
+                                            onClick={() => handleDownloadDocument(doc)}
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors border-surface-200 text-text-secondary hover:bg-surface-100"
+                                        >
+                                            <Download size={13} />
+                                            Завантажити
+                                        </button>
+                                        <button
+                                            onClick={() => setSelectedDocument(doc)}
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-brand-200 bg-brand-50 text-brand-700 text-xs font-semibold hover:bg-brand-100 transition-colors"
+                                        >
+                                            <Link2 size={13} />
+                                            Прив&apos;язати до задачі
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
-                    ) : (
+                    ) : !isDocumentsLoading ? (
                         <div className="py-10 text-center text-sm text-text-muted">
-                            Документів ще немає. Після завантаження у завданнях вони з&apos;являться тут.
+                            Документів ще немає.
                         </div>
-                    )}
+                    ) : null}
                 </div>
             )}
 
@@ -1073,6 +1153,13 @@ export default function ClientProfilePage() {
                     defaultResponsibleId={defaultAssigneeId}
                 />
             )}
+
+            <LinkDocumentToTaskModal
+                isOpen={!!selectedDocument}
+                onClose={() => setSelectedDocument(null)}
+                clientId={client.id}
+                document={selectedDocument}
+            />
         </div>
     );
 }

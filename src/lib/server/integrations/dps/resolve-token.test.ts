@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { orderAccountantCandidates } from './resolve-token';
+import { isEligibleDpsTokenOwnerRole, orderAccountantCandidates } from './resolve-token';
 
 describe('token candidate ordering', () => {
   it('prefers primary accountant and skips inactive candidates', () => {
@@ -14,5 +14,11 @@ describe('token candidate ordering', () => {
     );
 
     assert.deepEqual(ordered.map((row) => row.accountant_id), ['acc-1', 'acc-3']);
+  });
+
+  it('accepts admin and accountant profiles as token owners', () => {
+    assert.equal(isEligibleDpsTokenOwnerRole('accountant'), true);
+    assert.equal(isEligibleDpsTokenOwnerRole('admin'), true);
+    assert.equal(isEligibleDpsTokenOwnerRole('manager'), false);
   });
 });

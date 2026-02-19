@@ -8,6 +8,7 @@ import {
     LayoutDashboard,
     Users,
     KanbanSquare,
+    MessageSquare,
     ShieldCheck,
     Wallet,
     BarChart3,
@@ -21,7 +22,8 @@ import { cn, getInitials } from '@/lib/utils';
 import { USER_ROLE_LABELS } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
-import { isAdmin, getVisibleTasksForUser } from '@/lib/rbac';
+import { useUnreadTotal } from '@/lib/hooks/use-conversations';
+import { isAdmin, canAccessInbox, getVisibleTasksForUser } from '@/lib/rbac';
 
 interface NavItem {
     href: string;
@@ -34,6 +36,7 @@ const adminNavItems: NavItem[] = [
     { href: '/', label: 'Огляд', icon: LayoutDashboard },
     { href: '/clients', label: 'Клієнти', icon: Users },
     { href: '/tasks', label: 'Завдання', icon: KanbanSquare },
+    { href: '/inbox', label: 'Повідомлення', icon: MessageSquare },
     { href: '/licenses', label: 'Ліцензії', icon: ShieldCheck },
     { href: '/billing', label: 'Оплати', icon: Wallet },
     { href: '/team', label: 'Команда', icon: BarChart3 },
@@ -42,6 +45,7 @@ const adminNavItems: NavItem[] = [
 const accountantNavItems: NavItem[] = [
     { href: '/clients', label: 'Клієнти', icon: Users },
     { href: '/tasks', label: 'Завдання', icon: KanbanSquare },
+    { href: '/inbox', label: 'Повідомлення', icon: MessageSquare },
     { href: '/billing', label: 'Оплати', icon: Wallet },
 ];
 
@@ -94,6 +98,8 @@ export default function Sidebar() {
     const pathname = usePathname();
     const { profile, signOut } = useAuth();
     const { data: tasks } = useTasks();
+    const canViewInbox = profile ? canAccessInbox(profile) : false;
+    const { data: unreadTotal } = useUnreadTotal(canViewInbox);
     const [isExpanded, setIsExpanded] = useState(false);
     const tooltipRef = useRef<HTMLDivElement>(null);
     const [tooltip, setTooltip] = useState<Tooltip>({
@@ -106,15 +112,23 @@ export default function Sidebar() {
 
     const navItems = useMemo(() => {
         if (!profile) return [];
-        const base = isCurrentUserAdmin ? adminNavItems : accountantNavItems;
-        if (isCurrentUserAdmin) return base;
+        let navWithBadges = [...(isCurrentUserAdmin ? adminNavItems : accountantNavItems)];
+        if (!canViewInbox) {
+            navWithBadges = navWithBadges.filter(item => item.href !== '/inbox');
+        }
+        if (canViewInbox && (unreadTotal ?? 0) > 0) {
+            navWithBadges = navWithBadges.map(item =>
+                item.href === '/inbox' ? { ...item, badge: unreadTotal } : item
+            );
+        }
+        if (isCurrentUserAdmin) return navWithBadges;
         const todoCount = getVisibleTasksForUser(tasks ?? [], profile)
             .filter(t => t.status === 'todo').length;
-        if (todoCount === 0) return base;
-        return base.map(item =>
+        if (todoCount === 0) return navWithBadges;
+        return navWithBadges.map(item =>
             item.href === '/tasks' ? { ...item, badge: todoCount } : item
         );
-    }, [isCurrentUserAdmin, tasks, profile]);
+    }, [canViewInbox, isCurrentUserAdmin, unreadTotal, tasks, profile]);
     const settingsItems = isCurrentUserAdmin ? adminSettingsItems : accountantSettingsItems;
 
     const collapse = useCallback(() => {
@@ -200,7 +214,9 @@ export default function Sidebar() {
                                 <div className="relative nav-icon">
                                     <item.icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
                                     {item.badge && item.badge > 0 && (
-                                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" />
+                                        <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-semibold rounded-full ring-2 ring-white inline-flex items-center justify-center">
+                                            {item.badge > 99 ? '99+' : item.badge}
+                                        </span>
                                     )}
                                 </div>
                                 <span className="nav-label">{item.label}</span>

@@ -53,7 +53,7 @@ CREATE TABLE tenant_bots (
   public_id       uuid UNIQUE NOT NULL DEFAULT gen_random_uuid(),
   bot_username    text,
   display_name    text,
-  token_encrypted bytea NOT NULL,
+  token_encrypted text NOT NULL,
   webhook_secret  text NOT NULL,
   is_active       boolean NOT NULL DEFAULT true,
   created_at      timestamptz NOT NULL DEFAULT now(),

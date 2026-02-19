@@ -45,5 +45,16 @@ export const queryKeys = {
     byTasks: (taskIds: readonly string[]) => ['activityLog', 'tasks', ...taskIds] as const,
   },
 
+  conversations: {
+    all: ['conversations'] as const,
+    detail: (id: string) => ['conversations', id] as const,
+    messages: (conversationId: string) => ['conversations', conversationId, 'messages'] as const,
+    unreadTotal: ['conversations', 'unreadTotal'] as const,
+  },
+
+  documents: {
+    byClient: (clientId: string) => ['documents', 'client', clientId] as const,
+  },
+
   taxRulebook: ['taxRulebook'] as const,
 } as const;

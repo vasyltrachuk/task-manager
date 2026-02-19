@@ -16,6 +16,24 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Telegram Webhook In Local Dev (Public HTTPS)
+
+Telegram requires a public HTTPS webhook URL. For local development:
+
+```bash
+npm run dev:public
+```
+
+This script:
+
+- starts a public tunnel (`cloudflared` if installed, otherwise `npx localtunnel`)
+- gets a temporary HTTPS URL
+- runs Next.js with `NEXT_PUBLIC_APP_URL=<that-url>`
+
+Keep this terminal running while testing Telegram messages, then in Integrations click **Оновити webhook**.
+
+If `cloudflared` is missing, script will fallback automatically to `localtunnel` via npm.
+
 ## SaaS Billing Flags (Pre-Billing Stage)
 
 For early development before payment infrastructure is live:

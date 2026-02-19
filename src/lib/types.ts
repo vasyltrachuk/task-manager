@@ -60,6 +60,12 @@ export type BillingPlanCadence = 'monthly';
 export type InvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'overdue' | 'cancelled';
 export type PaymentStatus = 'received' | 'pending' | 'failed' | 'refunded';
 export type PaymentMethod = 'bank_transfer' | 'cash' | 'card';
+export type ConversationStatus = 'open' | 'closed' | 'archived';
+export type MessageDirection = 'inbound' | 'outbound';
+export type MessageSource = 'telegram' | 'dashboard' | 'system';
+export type MessageDeliveryStatus = 'received' | 'queued' | 'sent' | 'failed';
+
+export type DocumentOrigin = 'telegram' | 'upload';
 
 // ========== Models ==========
 export interface Profile {
@@ -102,6 +108,73 @@ export interface ClientAccountant {
   client_id: string;
   accountant_id: string;
   is_primary: boolean;
+}
+
+export interface Conversation {
+  id: string;
+  client_id?: string | null;
+  status: ConversationStatus;
+  assigned_accountant_id?: string | null;
+  last_message_at?: string | null;
+  unread_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversation_id: string;
+  direction: MessageDirection;
+  source: MessageSource;
+  sender_profile_id?: string | null;
+  telegram_message_id?: number | null;
+  body?: string | null;
+  status: MessageDeliveryStatus;
+  created_at: string;
+}
+
+export interface MessageAttachment {
+  id: string;
+  message_id: string;
+  telegram_file_id?: string | null;
+  storage_path: string;
+  file_name: string;
+  mime?: string | null;
+  size_bytes?: number | null;
+  duration_seconds?: number | null;
+  created_at: string;
+}
+
+export interface ClientDocument {
+  id: string;
+  client_id: string;
+  origin_attachment_id?: string | null;
+  storage_path: string;
+  file_name: string;
+  mime?: string | null;
+  size_bytes?: number | null;
+  doc_type?: string | null;
+  tags?: string[];
+  created_by?: string | null;
+  created_at: string;
+}
+
+export interface TelegramContactInfo {
+  id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  username?: string | null;
+}
+
+export interface ConversationListItem extends Conversation {
+  client?: Client | null;
+  telegram_contact?: TelegramContactInfo | null;
+  assigned_accountant?: Profile | null;
+}
+
+export interface ConversationMessageWithAttachments extends ConversationMessage {
+  attachments?: MessageAttachment[];
+  sender?: Profile | null;
 }
 
 export interface License {
@@ -273,7 +346,7 @@ export interface TaxRulebookConfig {
   vat_registration_threshold: number;
 }
 
-export type DpsRegistryCode = 'ev' | 'pdv_act' | 'non-profit';
+export type DpsRegistryCode = 'ev' | 'pdv_act' | 'non-profit' | 'registration';
 export type DpsSnapshotStatus = 'ok' | 'not_found' | 'error' | 'stale';
 export type DpsSyncRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'skipped_no_token';
 
@@ -480,4 +553,23 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   bank_transfer: 'Банківський переказ',
   cash: 'Готівка',
   card: 'Картка',
+};
+
+export const CONVERSATION_STATUS_LABELS: Record<ConversationStatus, string> = {
+  open: 'Відкрита',
+  closed: 'Закрита',
+  archived: 'Архів',
+};
+
+export const CONVERSATION_STATUS_COLORS: Record<ConversationStatus, string> = {
+  open: '#10B981',
+  closed: '#6B7280',
+  archived: '#475569',
+};
+
+export const MESSAGE_DELIVERY_STATUS_LABELS: Record<MessageDeliveryStatus, string> = {
+  received: 'Отримано',
+  queued: 'В черзі',
+  sent: 'Надіслано',
+  failed: 'Помилка',
 };

@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:public": "node scripts/dev-public-url.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "seed:dev": "npx tsx supabase/seed-dev.ts",
+    "seed:inbox-demo": "node scripts/seed-inbox-demo.mjs",
     "clean:team-data": "node scripts/clear-admin-accountant-data.mjs",
     "clean:all-data": "node scripts/clear-supabase-all-data.mjs",
     "check:supabase-clean": "node scripts/check-supabase-cleanliness.mjs"
@@ -37,6 +39,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "localtunnel": "^2.0.2",
     "supabase": "^2.76.9",
     "tailwindcss": "^4",
     "typescript": "^5"

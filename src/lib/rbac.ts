@@ -67,3 +67,11 @@ export function getVisibleTasksForUser(tasks: Task[], user: Profile): Task[] {
 
     return tasks.filter((task) => task.assignee_id === user.id);
 }
+
+export function canAccessInbox(user: Profile): boolean {
+    return isAdmin(user) || isAccountant(user);
+}
+
+export function canSendMessage(user: Profile): boolean {
+    return isAdmin(user) || isAccountant(user);
+}

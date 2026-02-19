@@ -41,6 +41,13 @@ interface AccountantCandidate {
   is_primary: boolean;
 }
 
+export const DPS_TOKEN_OWNER_ROLES = ['accountant', 'admin'] as const;
+const dpsTokenOwnerRoleSet = new Set<string>(DPS_TOKEN_OWNER_ROLES);
+
+export function isEligibleDpsTokenOwnerRole(role: string): boolean {
+  return dpsTokenOwnerRoleSet.has(role);
+}
+
 function uniqueTrimmedValues(values: string[]): string[] {
   return Array.from(
     new Set(
@@ -51,12 +58,12 @@ function uniqueTrimmedValues(values: string[]): string[] {
   );
 }
 
-async function getActiveAccountantIds(
+async function getActiveTokenOwnerIds(
   db: SupabaseClient,
   tenantId: string,
-  accountantIds?: string[]
+  profileIds?: string[]
 ): Promise<Set<string>> {
-  const normalizedIds = accountantIds ? uniqueTrimmedValues(accountantIds) : undefined;
+  const normalizedIds = profileIds ? uniqueTrimmedValues(profileIds) : undefined;
   if (normalizedIds && normalizedIds.length === 0) {
     return new Set();
   }
@@ -66,7 +73,7 @@ async function getActiveAccountantIds(
     .select('id, is_active, role')
     .eq('tenant_id', tenantId)
     .eq('is_active', true)
-    .eq('role', 'accountant');
+    .in('role', [...DPS_TOKEN_OWNER_ROLES]);
 
   if (normalizedIds) {
     query = query.in('id', normalizedIds);
@@ -120,14 +127,14 @@ export function orderAccountantCandidates(
 
 export async function resolveTokenForProfiles(input: ResolveByProfilesInput): Promise<ResolvedClientToken | null> {
   const profileIds = uniqueTrimmedValues(input.profileIds);
-  const activeAccountants = await getActiveAccountantIds(input.db, input.tenantId, profileIds);
+  const activeTokenOwners = await getActiveTokenOwnerIds(input.db, input.tenantId, profileIds);
 
   const prioritizedCandidates = orderAccountantCandidates(
     profileIds.map((profileId, index) => ({
       accountant_id: profileId,
       is_primary: index === 0,
     })),
-    activeAccountants
+    activeTokenOwners
   );
 
   const tokenFromSelected = await resolveTokenFromOrderedCandidates(
@@ -140,7 +147,7 @@ export async function resolveTokenForProfiles(input: ResolveByProfilesInput): Pr
     return tokenFromSelected;
   }
 
-  const fallbackCandidates = Array.from(await getActiveAccountantIds(input.db, input.tenantId)).map((profileId) => ({
+  const fallbackCandidates = Array.from(await getActiveTokenOwnerIds(input.db, input.tenantId)).map((profileId) => ({
     accountant_id: profileId,
     is_primary: false,
   }));
@@ -164,7 +171,7 @@ export async function resolveTokenForClient(input: ResolveInput): Promise<Resolv
   const typedAssignments = (assignments ?? []) as ClientAccountantRow[];
   if (typedAssignments.length === 0) return null;
 
-  const activeAccountants = await getActiveAccountantIds(db, tenantId, typedAssignments.map((row) => row.accountant_id));
-  const sortedCandidates = orderAccountantCandidates(typedAssignments, activeAccountants);
+  const activeTokenOwners = await getActiveTokenOwnerIds(db, tenantId, typedAssignments.map((row) => row.accountant_id));
+  const sortedCandidates = orderAccountantCandidates(typedAssignments, activeTokenOwners);
   return resolveTokenFromOrderedCandidates(db, tenantId, sortedCandidates);
 }

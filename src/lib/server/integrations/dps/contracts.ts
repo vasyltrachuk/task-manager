@@ -1,4 +1,6 @@
-export const DPS_REGISTRY_CODES = ['ev', 'pdv_act', 'non-profit'] as const;
+export const DPS_REGISTRY_CODES = ['ev', 'pdv_act', 'non-profit', 'registration'] as const;
+export const DPS_SYNC_REGISTRY_CODES = ['ev', 'pdv_act', 'non-profit'] as const;
+export const DPS_PREFILL_REGISTRY_CODES = ['registration', 'ev', 'pdv_act', 'non-profit'] as const;
 
 export type DpsRegistryCode = (typeof DPS_REGISTRY_CODES)[number];
 export type DpsSnapshotStatus = 'ok' | 'not_found' | 'error' | 'stale';
@@ -17,7 +19,13 @@ export interface DpsNormalizedRegistryPayload {
   registrationDate?: string;
   dpsOfficeName?: string;
   dpsOfficeCode?: string;
+  address?: string;
+  activityCode?: string;
+  activityName?: string;
+  registrationState?: string;
   note?: string;
+  // registration реєстр: КВЕД + ліцензійна діяльність (поле VED_LIC)
+  vedLic?: string;
 }
 
 export interface DpsRegistryFetchResult {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { X, Building2, User, Phone, Mail, Hash, FileText, RefreshCw } from 'lucide-react';
+import { X, Building2, User, Phone, Mail, Hash, FileText, RefreshCw, MapPin, Calendar, Landmark, Tag } from 'lucide-react';
 import {
     Client,
     ClientType,
@@ -126,6 +126,11 @@ function applyDpsPrefillSuggestion(
         appliedFields.push('система оподаткування');
     }
 
+    if (suggestion.industry && suggestion.industry !== formData.industry) {
+        next.industry = suggestion.industry;
+        appliedFields.push('сфера діяльності');
+    }
+
     if (suggestion.notes) {
         const mergedNotes = mergeNotesWithDpsAutofill(formData.notes, suggestion.notes);
         if (mergedNotes !== formData.notes) {
@@ -212,6 +217,8 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [dpsPrefillError, setDpsPrefillError] = useState<string | null>(null);
     const [dpsPrefillMessage, setDpsPrefillMessage] = useState<string | null>(null);
+    const [dpsPrefillWarnings, setDpsPrefillWarnings] = useState<string[]>([]);
+    const [lastPrefillSuggestion, setLastPrefillSuggestion] = useState<DpsClientPrefillSuggestion | null>(null);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [showAnalytics, setShowAnalytics] = useState(Boolean(editClient));
     const normalizedTaxId = normalizeTaxIdInput(formData.tax_id);
@@ -392,6 +399,7 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
     const handleDpsPrefill = async () => {
         if (!isTaxIdValid) {
             setDpsPrefillMessage(null);
+            setDpsPrefillWarnings([]);
             setDpsPrefillError(`${CLIENT_TAX_ID_TYPE_LABELS[formData.tax_id_type]} має містити ${TAX_ID_LENGTH_BY_TYPE[formData.tax_id_type]} цифр.`);
             return;
         }
@@ -399,6 +407,7 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
         try {
             setDpsPrefillError(null);
             setDpsPrefillMessage(null);
+            setDpsPrefillWarnings([]);
 
             const payload = await dpsPrefillMutation.mutateAsync({
                 taxIdType: formData.tax_id_type,
@@ -406,11 +415,20 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
                 accountantIds: formData.assignee_ids,
             });
 
+            if (payload.debug && typeof window !== 'undefined') {
+                console.info('[dps_prefill_debug_client]', payload.debug);
+            }
+
             const { nextFormData, appliedFields } = applyDpsPrefillSuggestion(formData, payload.suggestion);
             setFormData(nextFormData);
+            setLastPrefillSuggestion(payload.suggestion);
+
+            if (payload.warnings?.length) {
+                setDpsPrefillWarnings(payload.warnings);
+            }
 
             if (appliedFields.length === 0) {
-                setDpsPrefillMessage('Дані ДПС отримано, але нових полів для оновлення немає.');
+                setDpsPrefillMessage('Дані ДПС отримано. Перегляньте картку нижче.');
                 return;
             }
 
@@ -504,6 +522,8 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
                                     setErrors(prev => ({ ...prev, tax_id: '' }));
                                     setDpsPrefillError(null);
                                     setDpsPrefillMessage(null);
+                                    setDpsPrefillWarnings([]);
+                                    setLastPrefillSuggestion(null);
                                     setSubmitError(null);
                                 }}
                                 placeholder={TAX_ID_PLACEHOLDERS[formData.tax_id_type]}
@@ -529,15 +549,108 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
                                         Підтягнути з ДПС
                                     </button>
                                     <p className="text-[11px] text-text-muted">
-                                        Автозаповнення використовує токен призначеного бухгалтера або будь-який активний токен у tenant.
+                                        Автозаповнення використовує токен призначеного бухгалтера або будь-який активний токен адміністратора/бухгалтера у tenant.
                                     </p>
                                 </div>
                             )}
                             {errors.tax_id && <p className="text-xs text-red-500 mt-1">{errors.tax_id}</p>}
                             {dpsPrefillError && <p className="text-xs text-red-500 mt-1">{dpsPrefillError}</p>}
                             {dpsPrefillMessage && <p className="text-xs text-emerald-700 mt-1">{dpsPrefillMessage}</p>}
+                            {dpsPrefillWarnings.length > 0 && (
+                                <div className="mt-1 space-y-0.5">
+                                    {dpsPrefillWarnings.map((w, i) => (
+                                        <p key={i} className="text-xs text-amber-700">⚠ {w}</p>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </section>
+
+                    {/* DPS structured data card */}
+                    {lastPrefillSuggestion && (
+                        <section className="rounded-xl border border-brand-200 bg-brand-50/40 p-4 space-y-3">
+                            <div className="flex items-center gap-2">
+                                <div className="w-5 h-5 rounded-md bg-brand-100 flex items-center justify-center">
+                                    <Landmark size={12} className="text-brand-600" />
+                                </div>
+                                <p className="text-xs font-semibold text-brand-700 uppercase tracking-wider">Дані з реєстрів ДПС</p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                {lastPrefillSuggestion.dps_office_name && (
+                                    <div className="rounded-lg bg-white border border-brand-100 px-3 py-2">
+                                        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1">
+                                            <Landmark size={10} />
+                                            Найменування ДПІ
+                                        </p>
+                                        <p className="text-xs text-text-primary mt-0.5 font-medium">
+                                            {lastPrefillSuggestion.dps_office_name}
+                                            {lastPrefillSuggestion.dps_office_code && (
+                                                <span className="text-text-muted font-normal"> ({lastPrefillSuggestion.dps_office_code})</span>
+                                            )}
+                                        </p>
+                                    </div>
+                                )}
+                                {lastPrefillSuggestion.tax_registration_date && (
+                                    <div className="rounded-lg bg-white border border-brand-100 px-3 py-2">
+                                        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1">
+                                            <Calendar size={10} />
+                                            Дата взяття на облік
+                                        </p>
+                                        <p className="text-xs text-text-primary mt-0.5 font-medium">
+                                            {lastPrefillSuggestion.tax_registration_date}
+                                        </p>
+                                    </div>
+                                )}
+                                {lastPrefillSuggestion.simplified_system_date && (
+                                    <div className="rounded-lg bg-white border border-brand-100 px-3 py-2">
+                                        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1">
+                                            <Calendar size={10} />
+                                            Дата переходу на спрощену
+                                        </p>
+                                        <p className="text-xs text-text-primary mt-0.5 font-medium">
+                                            {lastPrefillSuggestion.simplified_system_date}
+                                        </p>
+                                    </div>
+                                )}
+                                {lastPrefillSuggestion.single_tax_group && (
+                                    <div className="rounded-lg bg-white border border-brand-100 px-3 py-2">
+                                        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1">
+                                            <Tag size={10} />
+                                            Група єдиного податку
+                                        </p>
+                                        <p className="text-xs text-text-primary mt-0.5 font-medium">
+                                            {lastPrefillSuggestion.single_tax_group} група
+                                        </p>
+                                    </div>
+                                )}
+                                {lastPrefillSuggestion.tax_address && (
+                                    <div className="rounded-lg bg-white border border-brand-100 px-3 py-2 md:col-span-2">
+                                        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1">
+                                            <MapPin size={10} />
+                                            Податкова адреса
+                                        </p>
+                                        <p className="text-xs text-text-primary mt-0.5 font-medium">
+                                            {lastPrefillSuggestion.tax_address}
+                                        </p>
+                                    </div>
+                                )}
+                                {lastPrefillSuggestion.ved_lic && (
+                                    <div className="rounded-lg bg-white border border-brand-100 px-3 py-2 md:col-span-2">
+                                        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1">
+                                            <FileText size={10} />
+                                            КВЕД / Ліцензована діяльність
+                                        </p>
+                                        <p className="text-xs text-text-primary mt-0.5">
+                                            {lastPrefillSuggestion.ved_lic}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                            <p className="text-[10px] text-text-muted">
+                                Ці дані відображаються для довідки та включені в нотатки клієнта. Зберігаються після натискання «Створити клієнта».
+                            </p>
+                        </section>
+                    )}
 
                     {/* Required core */}
                     <section className="rounded-xl border border-surface-200 p-4 space-y-4">

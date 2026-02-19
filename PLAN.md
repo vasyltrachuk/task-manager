@@ -138,14 +138,31 @@ Dashboard (бухгалтер)
 
 ```text
 File in Telegram message
-  → Worker downloads via grammy getFile (до 20 MB)
-  → Upload to Supabase Storage: /{tenant_id}/documents/{uuid}/{filename}
-  → Create document record (tenant_id, client_id, origin_message_id)
-  → Бухгалтер може:
-    → Переглянути (signed URL, TTL 5 хв)
-    → Прив'язати до задачі (task_documents)
-    → Прив'язати до клієнта (вже через client_id)
+  → Inbound worker: зберігаємо telegram_file_id (НЕ завантажуємо бінарний файл)
+  → storage_path = логічний ключ tenantId/tg/<attachmentId>_filename (рядок для access-control, не реальний файл)
+  → Для реальних документів (PDF, DOCX, ZIP...): створюємо запис у documents
+  → Для медіа (voice, photo, sticker, video_note): тільки message_attachments, не documents
+  → Outbound voice: sendVoice → telegram_file_id береться з відповіді Telegram, без завантаження в Storage
+  → Архів: copyMessage до TELEGRAM_ARCHIVE_CHAT_ID (резервна копія на випадок видалення оригіналу)
+  → Бухгалтер проглядає/слухає файл:
+    → /api/documents/download?attachmentId=...&path=...
+    → Сервер викликає getFile(telegram_file_id) → отримує свіжий file_path
+    → Проксує через сервер (Content-Disposition: inline для медіа)
+    → Токен ніколи не потрапляє у браузер
 ```
+
+> **Ключовий патерн Telegram Storage**
+>
+> - `file_id` — **постійний** ідентифікатор файлу (Telegram офіційно: "can be treated as persistent").
+>   Зберігати в БД і використовувати для ідентифікації.
+> - `file_path` — **тимчасовий** download URL (TTL ~1 год), повертається `getFile()`.
+>   **Ніколи не кешувати** — завжди викликати `getFile(file_id)` прямо перед скачуванням.
+> - `file_unique_id` — постійний міжботовий ідентифікатор файлу (для дедуплікації).
+>   Не можна використовувати для скачування.
+> - `file_id` стає недійсним тільки якщо: оригінальне повідомлення видалено, бот втратив
+>   доступ до чату, або рідкісна серверна міграція Telegram.
+> - **Не зберігати бінарні файли Telegram у Supabase Storage** — дублювання платного місця.
+>   Виняток: файли, завантажені безпосередньо бухгалтером через dashboard (не з Telegram).
 
 ## 5. Обмеження Telegram, враховані в дизайні
 
@@ -154,6 +171,10 @@ File in Telegram message
 - `sendDocument`: до ~50 MB.
 - Великі файли: або Local Bot API Server, або зовнішнє завантаження через лінк.
 - Rate limits: 30 msg/sec per bot, 20 msg/min per chat.
+- **`file_id` vs `file_path`**:
+  - `file_id` — постійний (persistent), зберігати в БД.
+  - `file_path` — тимчасовий (~1 год TTL), отримується через `getFile(file_id)` безпосередньо перед скачуванням, **не кешувати**.
+  - Скачування завжди: `getFile(file_id)` → `api.telegram.org/file/bot{token}/{file_path}`.
 
 ## 6. Схема даних (Supabase Postgres) — з нуля
 

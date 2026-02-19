@@ -3,11 +3,14 @@ import type {
   Profile, Client, Task, SubTask, TaskComment, TaskFile,
   License, BillingPlan, Invoice, Payment, PaymentAllocation,
   ActivityLogEntry, TaxRulebookConfig,
+  ConversationListItem, ConversationMessageWithAttachments,
+  ClientDocument, MessageAttachment,
   UserRole, ClientType, ClientTaxIdType, ClientStatus, TaxSystem,
   IncomeLimitSource, TaskStatus, TaskType, TaskPriority, RecurrenceType,
   LicenseType, LicenseStatus, LicensePaymentFrequency, LicenseCheckResult,
   BillingPlanCadence, BillingCurrency, InvoiceStatus, PaymentStatus, PaymentMethod,
   SingleTaxRulebookGroup,
+  ConversationStatus, MessageDirection, MessageSource, MessageDeliveryStatus,
 } from './types';
 
 // Shorthand aliases for DB row types
@@ -263,6 +266,83 @@ export function mapDbAuditEntry(
     details: (meta.details as string) ?? undefined,
     created_at: row.created_at,
     actor: row.actor ? mapDbProfile(row.actor) : undefined,
+  };
+}
+
+// ── Conversations ────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function mapDbConversationListItem(row: any): ConversationListItem {
+  const telegramContact = row.telegram_contact
+    ? {
+        id: row.telegram_contact.id,
+        first_name: row.telegram_contact.first_name ?? null,
+        last_name: row.telegram_contact.last_name ?? null,
+        username: row.telegram_contact.username ?? null,
+      }
+    : null;
+
+  return {
+    id: row.id,
+    client_id: row.client_id ?? null,
+    status: row.status as ConversationStatus,
+    assigned_accountant_id: row.assigned_accountant_id ?? null,
+    last_message_at: row.last_message_at ?? null,
+    unread_count: row.unread_count ?? 0,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    client: row.client ? mapDbClient(row.client) : null,
+    telegram_contact: telegramContact,
+    assigned_accountant: row.assigned_accountant ? mapDbProfile(row.assigned_accountant) : null,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapDbMessageAttachment(row: any): MessageAttachment {
+  return {
+    id: row.id,
+    message_id: row.message_id,
+    telegram_file_id: row.telegram_file_id ?? null,
+    storage_path: row.storage_path,
+    file_name: row.file_name,
+    mime: row.mime ?? null,
+    size_bytes: row.size_bytes ?? null,
+    duration_seconds: row.duration_seconds ?? null,
+    created_at: row.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function mapDbConversationMessage(row: any): ConversationMessageWithAttachments {
+  return {
+    id: row.id,
+    conversation_id: row.conversation_id,
+    direction: row.direction as MessageDirection,
+    source: row.source as MessageSource,
+    sender_profile_id: row.sender_profile_id ?? null,
+    telegram_message_id: row.telegram_message_id ?? null,
+    body: row.body ?? null,
+    status: row.status as MessageDeliveryStatus,
+    created_at: row.created_at,
+    attachments: row.message_attachments?.map(mapDbMessageAttachment) ?? [],
+    sender: row.sender ? mapDbProfile(row.sender) : null,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function mapDbClientDocument(row: any): ClientDocument {
+  return {
+    id: row.id,
+    client_id: row.client_id,
+    origin_attachment_id: row.origin_attachment_id ?? null,
+    storage_path: row.storage_path,
+    file_name: row.file_name,
+    mime: row.mime ?? null,
+    size_bytes: row.size_bytes ?? null,
+    doc_type: row.doc_type ?? null,
+    tags: row.tags ?? [],
+    created_by: row.created_by ?? null,
+    created_at: row.created_at,
   };
 }
 
