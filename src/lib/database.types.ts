@@ -161,6 +161,10 @@ export type Database = {
       }
       clients: {
         Row: {
+          avatar_source: string | null
+          avatar_telegram_file_id: string | null
+          avatar_updated_at: string | null
+          avatar_url: string | null
           contact_email: string | null
           contact_phone: string | null
           created_at: string
@@ -181,6 +185,10 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          avatar_source?: string | null
+          avatar_telegram_file_id?: string | null
+          avatar_updated_at?: string | null
+          avatar_url?: string | null
           contact_email?: string | null
           contact_phone?: string | null
           created_at?: string
@@ -201,6 +209,10 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          avatar_source?: string | null
+          avatar_telegram_file_id?: string | null
+          avatar_updated_at?: string | null
+          avatar_url?: string | null
           contact_email?: string | null
           contact_phone?: string | null
           created_at?: string
@@ -864,6 +876,9 @@ export type Database = {
           is_active: boolean
           phone: string | null
           role: string
+          telegram_chat_id: number | null
+          telegram_link_code: string | null
+          telegram_link_code_expires_at: string | null
           tenant_id: string
         }
         Insert: {
@@ -875,6 +890,9 @@ export type Database = {
           is_active?: boolean
           phone?: string | null
           role?: string
+          telegram_chat_id?: number | null
+          telegram_link_code?: string | null
+          telegram_link_code_expires_at?: string | null
           tenant_id: string
         }
         Update: {
@@ -886,6 +904,9 @@ export type Database = {
           is_active?: boolean
           phone?: string | null
           role?: string
+          telegram_chat_id?: number | null
+          telegram_link_code?: string | null
+          telegram_link_code_expires_at?: string | null
           tenant_id?: string
         }
         Relationships: [

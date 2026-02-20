@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     Calendar,
     Search,
@@ -9,20 +9,84 @@ import {
     UserPlus,
     MoreVertical,
     UserX,
+    UserCheck,
     Pencil,
+    Trash2,
     Users,
-    Shield,
+    MessageCircle,
+    Loader2,
+    Link2Off,
+    Key,
 } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useAuth } from '@/lib/auth-context';
-import { useProfiles, useDeactivateProfile } from '@/lib/hooks/use-profiles';
+import {
+    useProfiles,
+    useDeactivateProfile,
+    useReactivateProfile,
+    useDeleteProfileSafely,
+    useRegenerateProfilePassword,
+} from '@/lib/hooks/use-profiles';
 import { useTasks } from '@/lib/hooks/use-tasks';
 import { Profile } from '@/lib/types';
 import { cn, getInitials, formatDate } from '@/lib/utils';
-import AccountantFormModal from '@/components/team/accountant-form-modal';
+import AccountantFormModal, { AccountantCredentials } from '@/components/team/accountant-form-modal';
 import AccessDeniedCard from '@/components/ui/access-denied-card';
 import { canManageTeam } from '@/lib/rbac';
 
 const DAYS_OF_WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
+
+interface TelegramLinkResponse {
+    code: string;
+    expiresAt: string;
+    botUsername: string | null;
+    alreadyLinked: boolean;
+}
+
+interface TelegramLinkUiState {
+    code?: string;
+    expiresAt?: string;
+    botUsername?: string | null;
+    error?: string;
+    notice?: string;
+}
+
+function readErrorMessage(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object') return null;
+    const maybeError = (payload as { error?: unknown }).error;
+    return typeof maybeError === 'string' ? maybeError : null;
+}
+
+function formatTelegramExpiry(value?: string): string {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleString('uk-UA', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+function getTelegramExpiryMs(value?: string): number | null {
+    if (!value) return null;
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? ms : null;
+}
+
+function isTelegramCodeExpired(value?: string): boolean {
+    const ms = getTelegramExpiryMs(value);
+    return ms !== null && ms <= Date.now();
+}
+
+function getTelegramCodeMinutesLeft(value?: string): number | null {
+    const ms = getTelegramExpiryMs(value);
+    if (ms === null) return null;
+    const leftMs = ms - Date.now();
+    if (leftMs <= 0) return 0;
+    return Math.ceil(leftMs / 60000);
+}
 
 function getWeekDays(baseDate: Date): Date[] {
     const monday = new Date(baseDate);
@@ -57,9 +121,12 @@ function getTaskCountForDay(accountantId: string, dayIndex: number, accountantsL
 
 export default function TeamLoadPage() {
     const { profile } = useAuth();
-    const { data: profiles } = useProfiles();
+    const { data: profiles, refetch: refetchProfiles } = useProfiles();
     const { data: tasks } = useTasks();
     const deactivateProfileMutation = useDeactivateProfile();
+    const reactivateProfileMutation = useReactivateProfile();
+    const deleteProfileMutation = useDeleteProfileSafely();
+    const regeneratePasswordMutation = useRegenerateProfilePassword();
 
     const [activeTab, setActiveTab] = useState<'manage' | 'capacity'>('manage');
     const [searchQuery, setSearchQuery] = useState('');
@@ -69,12 +136,74 @@ export default function TeamLoadPage() {
     // Modal state
     const [showFormModal, setShowFormModal] = useState(false);
     const [editProfile, setEditProfile] = useState<Profile | null>(null);
+    const [previewCredentials, setPreviewCredentials] = useState<AccountantCredentials | null>(null);
+    const [passwordResetProfileId, setPasswordResetProfileId] = useState<string | null>(null);
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+    const [telegramLoading, setTelegramLoading] = useState<{ id: string; action: 'generate' | 'unlink' } | null>(null);
+    const [telegramUiStateByProfile, setTelegramUiStateByProfile] = useState<Record<string, TelegramLinkUiState>>({});
+
+    const accountants = (profiles ?? []).filter((p: Profile) => p.role === 'accountant');
+    const canManage = profile ? canManageTeam(profile) : false;
+    const hasPendingTelegramLinks = accountants.some((acc) => {
+        const ui = telegramUiStateByProfile[acc.id];
+        return !acc.telegram_chat_id && Boolean(ui?.code) && !isTelegramCodeExpired(ui.expiresAt);
+    });
+
+    useEffect(() => {
+        if (!hasPendingTelegramLinks) return;
+        const timerId = window.setInterval(() => {
+            void refetchProfiles();
+        }, 5000);
+        return () => window.clearInterval(timerId);
+    }, [hasPendingTelegramLinks, refetchProfiles]);
+
+    useEffect(() => {
+        if (accountants.length === 0) return;
+        setTelegramUiStateByProfile((prev) => {
+            let changed = false;
+            const next: Record<string, TelegramLinkUiState> = { ...prev };
+
+            for (const acc of accountants) {
+                const current = next[acc.id];
+                if (!current) continue;
+
+                if (acc.telegram_chat_id) {
+                    const connectedNotice = 'Telegram підключено.';
+                    if (
+                        current.code ||
+                        current.expiresAt ||
+                        current.error ||
+                        current.notice !== connectedNotice
+                    ) {
+                        next[acc.id] = {
+                            ...current,
+                            code: undefined,
+                            expiresAt: undefined,
+                            error: undefined,
+                            notice: connectedNotice,
+                        };
+                        changed = true;
+                    }
+                    continue;
+                }
+
+                if (current.code && isTelegramCodeExpired(current.expiresAt)) {
+                    next[acc.id] = {
+                        ...current,
+                        code: undefined,
+                        expiresAt: undefined,
+                        notice: undefined,
+                        error: 'Термін дії коду минув. Згенеруйте новий код.',
+                    };
+                    changed = true;
+                }
+            }
+
+            return changed ? next : prev;
+        });
+    }, [accountants]);
 
     if (!profile) return null;
-
-    const canManage = canManageTeam(profile);
-    const accountants = (profiles ?? []).filter((p: Profile) => p.role === 'accountant');
 
     if (!canManage) {
         return <AccessDeniedCard message="Розділ команди доступний лише адміністратору." />;
@@ -88,15 +217,172 @@ export default function TeamLoadPage() {
             a.phone.includes(searchQuery);
     });
 
+    const readMutationMessage = (error: unknown, fallback: string) =>
+        error instanceof Error && error.message ? error.message : fallback;
+
     const handleEdit = (profile: Profile) => {
         setEditProfile(profile);
         setShowFormModal(true);
         setMenuOpenId(null);
     };
 
-    const handleDeactivate = (profileId: string) => {
-        deactivateProfileMutation.mutate(profileId);
-        setMenuOpenId(null);
+    const handleDeactivate = async (profileId: string) => {
+        try {
+            await deactivateProfileMutation.mutateAsync(profileId);
+            setMenuOpenId(null);
+        } catch (error) {
+            window.alert(readMutationMessage(error, 'Не вдалося деактивувати профіль.'));
+        }
+    };
+
+    const handleReactivate = async (profileId: string) => {
+        try {
+            await reactivateProfileMutation.mutateAsync(profileId);
+            setMenuOpenId(null);
+        } catch (error) {
+            window.alert(readMutationMessage(error, 'Не вдалося активувати профіль.'));
+        }
+    };
+
+    const handleDeleteProfile = async (staffProfile: Profile) => {
+        const confirmed = window.confirm(
+            `Видалити бухгалтера "${staffProfile.full_name}" назавжди?\n\nЦе можна зробити лише якщо профіль не прив'язаний до клієнтів і не має історії.`
+        );
+        if (!confirmed) return;
+
+        try {
+            await deleteProfileMutation.mutateAsync(staffProfile.id);
+            setTelegramUiStateByProfile((prev) => {
+                const next = { ...prev };
+                delete next[staffProfile.id];
+                return next;
+            });
+            setMenuOpenId(null);
+        } catch (error) {
+            window.alert(readMutationMessage(error, 'Не вдалося видалити профіль.'));
+        }
+    };
+
+    const handleRegeneratePassword = async (staffProfile: Profile) => {
+        if (!staffProfile.email) {
+            window.alert('У профілю немає email. Додайте email у картці бухгалтера, щоб згенерувати пароль.');
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Перегенерувати пароль для "${staffProfile.full_name}"?\n\nПопередній пароль перестане працювати одразу після підтвердження.`
+        );
+        if (!confirmed) return;
+
+        setPasswordResetProfileId(staffProfile.id);
+        try {
+            const result = await regeneratePasswordMutation.mutateAsync(staffProfile.id);
+            setPreviewCredentials({
+                login: result.email ?? staffProfile.email,
+                password: result.generated_password ?? '',
+                name: result.full_name ?? staffProfile.full_name,
+                context: 'reset',
+            });
+            setMenuOpenId(null);
+        } catch (error) {
+            window.alert(readMutationMessage(error, 'Не вдалося перегенерувати пароль.'));
+        } finally {
+            setPasswordResetProfileId((current) => (current === staffProfile.id ? null : current));
+        }
+    };
+
+    const handleGenerateTelegramCode = async (staffProfile: Profile) => {
+        setTelegramLoading({ id: staffProfile.id, action: 'generate' });
+        setTelegramUiStateByProfile((prev) => ({
+            ...prev,
+            [staffProfile.id]: { ...prev[staffProfile.id], error: undefined, notice: undefined },
+        }));
+
+        try {
+            const response = await fetch('/api/staff/telegram-link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profileId: staffProfile.id }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(readErrorMessage(payload) ?? 'Не вдалося згенерувати Telegram-код.');
+            }
+
+            const data = payload as TelegramLinkResponse;
+            if (data.alreadyLinked) {
+                await refetchProfiles();
+                setTelegramUiStateByProfile((prev) => ({
+                    ...prev,
+                    [staffProfile.id]: {
+                        ...prev[staffProfile.id],
+                        code: undefined,
+                        expiresAt: undefined,
+                        botUsername: data.botUsername,
+                        error: undefined,
+                        notice: 'Telegram уже підключено для цього бухгалтера.',
+                    },
+                }));
+                return;
+            }
+
+            setTelegramUiStateByProfile((prev) => ({
+                ...prev,
+                [staffProfile.id]: {
+                    code: data.code,
+                    expiresAt: data.expiresAt,
+                    botUsername: data.botUsername,
+                    error: undefined,
+                    notice: 'Код згенеровано. Очікуємо підтвердження від бухгалтера в Telegram.',
+                },
+            }));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Не вдалося згенерувати Telegram-код.';
+            setTelegramUiStateByProfile((prev) => ({
+                ...prev,
+                [staffProfile.id]: { ...prev[staffProfile.id], notice: undefined, error: message },
+            }));
+        } finally {
+            setTelegramLoading((current) => (current?.id === staffProfile.id && current.action === 'generate' ? null : current));
+        }
+    };
+
+    const handleUnlinkTelegram = async (staffProfile: Profile) => {
+        const confirmed = window.confirm(`Відв'язати Telegram у бухгалтера "${staffProfile.full_name}"?`);
+        if (!confirmed) return;
+
+        setTelegramLoading({ id: staffProfile.id, action: 'unlink' });
+        setTelegramUiStateByProfile((prev) => ({
+            ...prev,
+            [staffProfile.id]: { ...prev[staffProfile.id], error: undefined, notice: undefined },
+        }));
+
+        try {
+            const response = await fetch('/api/staff/telegram-link', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profileId: staffProfile.id }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(readErrorMessage(payload) ?? 'Не вдалося відв’язати Telegram.');
+            }
+
+            setTelegramUiStateByProfile((prev) => {
+                const next = { ...prev };
+                next[staffProfile.id] = { notice: 'Telegram відвʼязано.' };
+                return next;
+            });
+            await refetchProfiles();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Не вдалося відв’язати Telegram.';
+            setTelegramUiStateByProfile((prev) => ({
+                ...prev,
+                [staffProfile.id]: { ...prev[staffProfile.id], error: message },
+            }));
+        } finally {
+            setTelegramLoading((current) => (current?.id === staffProfile.id && current.action === 'unlink' ? null : current));
+        }
     };
 
     return (
@@ -174,6 +460,13 @@ export default function TeamLoadPage() {
                     <div className="space-y-3">
                         {filteredAccountants.map((acc) => {
                             const activeTasks = (tasks ?? []).filter(t => t.assignee_id === acc.id && t.status !== 'done');
+                            const telegramUi = telegramUiStateByProfile[acc.id];
+                            const linkExpired = isTelegramCodeExpired(telegramUi?.expiresAt);
+                            const pendingTelegramLink = Boolean(telegramUi?.code) && !acc.telegram_chat_id && !linkExpired;
+                            const telegramMinutesLeft = getTelegramCodeMinutesLeft(telegramUi?.expiresAt);
+                            const generatingCode = telegramLoading?.id === acc.id && telegramLoading.action === 'generate';
+                            const unlinkingTelegram = telegramLoading?.id === acc.id && telegramLoading.action === 'unlink';
+                            const resettingPassword = passwordResetProfileId === acc.id;
 
                             return (
                                 <div
@@ -214,41 +507,187 @@ export default function TeamLoadPage() {
                                                 <span>• {activeTasks.length} активних завдань</span>
                                                 <span>• Створено {formatDate(acc.created_at)}</span>
                                             </div>
+                                            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                                {acc.telegram_chat_id ? (
+                                                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                                        Telegram підключено
+                                                    </span>
+                                                ) : pendingTelegramLink ? (
+                                                    <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+                                                        Очікує підтвердження в Telegram
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-[10px] font-semibold text-text-muted bg-surface-100 px-2 py-0.5 rounded-full">
+                                                        Telegram не підключено
+                                                    </span>
+                                                )}
+                                                {pendingTelegramLink && telegramUi?.expiresAt && (
+                                                    <span className="text-[10px] text-text-muted">
+                                                        Код діє ще {telegramMinutesLeft ?? 0} хв (до {formatTelegramExpiry(telegramUi.expiresAt)})
+                                                    </span>
+                                                )}
+                                                {!pendingTelegramLink && telegramUi?.notice && (
+                                                    <span className="text-[10px] text-emerald-700">{telegramUi.notice}</span>
+                                                )}
+                                                {telegramUi?.error && (
+                                                    <span className="text-[10px] text-red-600">{telegramUi.error}</span>
+                                                )}
+                                            </div>
                                         </div>
 
                                         {/* Actions menu */}
-                                        <div className="relative flex-shrink-0">
-                                            <button
-                                                onClick={() => setMenuOpenId(menuOpenId === acc.id ? null : acc.id)}
-                                                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-100 text-text-muted hover:text-text-primary transition-colors"
+                                        <div className="flex-shrink-0">
+                                            <DropdownMenu.Root
+                                                open={menuOpenId === acc.id}
+                                                onOpenChange={(open) => {
+                                                    if (open) {
+                                                        setMenuOpenId(acc.id);
+                                                        return;
+                                                    }
+                                                    setMenuOpenId((current) => (current === acc.id ? null : current));
+                                                }}
                                             >
-                                                <MoreVertical size={16} />
-                                            </button>
-
-                                            {menuOpenId === acc.id && (
-                                                <div className="absolute right-0 top-10 w-56 bg-white border border-surface-200 rounded-xl shadow-lg z-20 py-1.5 animate-in fade-in zoom-in-95 duration-150">
+                                                <DropdownMenu.Trigger asChild>
                                                     <button
-                                                        onClick={() => handleEdit(acc)}
-                                                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-50 transition-colors"
+                                                        className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-100 hover:text-text-primary transition-colors"
                                                     >
-                                                        <Pencil size={14} /> Редагувати
+                                                        <MoreVertical size={16} />
                                                     </button>
-                                                    <div className="border-t border-surface-100 my-1" />
-                                                    {acc.is_active ? (
+                                                </DropdownMenu.Trigger>
+
+                                                <DropdownMenu.Portal>
+                                                    <DropdownMenu.Content
+                                                        sideOffset={8}
+                                                        align="end"
+                                                        collisionPadding={12}
+                                                        className="z-[120] w-56 bg-white border border-surface-200 rounded-xl shadow-lg py-1.5 animate-in fade-in zoom-in-95 duration-150"
+                                                    >
                                                         <button
-                                                            onClick={() => handleDeactivate(acc.id)}
+                                                            onClick={() => handleEdit(acc)}
+                                                            className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-50 transition-colors"
+                                                        >
+                                                            <Pencil size={14} /> Редагувати
+                                                        </button>
+                                                        <button
+                                                            onClick={() => void handleRegeneratePassword(acc)}
+                                                            disabled={resettingPassword || !acc.email}
+                                                            className={cn(
+                                                                'w-full flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors',
+                                                                resettingPassword || !acc.email
+                                                                    ? 'text-text-muted cursor-not-allowed'
+                                                                    : 'text-text-primary hover:bg-surface-50'
+                                                            )}
+                                                        >
+                                                            {resettingPassword
+                                                                ? <Loader2 size={14} className="animate-spin" />
+                                                                : <Key size={14} />}
+                                                            {resettingPassword
+                                                                ? 'Оновлюємо пароль...'
+                                                                : 'Перегенерувати пароль'}
+                                                        </button>
+                                                        <div className="border-t border-surface-100 my-1" />
+
+                                                        {acc.telegram_chat_id ? (
+                                                            <>
+                                                                <div className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-emerald-700 bg-emerald-50/70">
+                                                                    <MessageCircle size={14} />
+                                                                    Telegram підключено
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => void handleUnlinkTelegram(acc)}
+                                                                    disabled={unlinkingTelegram}
+                                                                    className={cn(
+                                                                        'w-full flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors',
+                                                                        unlinkingTelegram
+                                                                            ? 'text-text-muted cursor-not-allowed'
+                                                                            : 'text-text-primary hover:bg-surface-50'
+                                                                    )}
+                                                                >
+                                                                    {unlinkingTelegram
+                                                                        ? <Loader2 size={14} className="animate-spin" />
+                                                                        : <Link2Off size={14} />}
+                                                                    {unlinkingTelegram ? 'Відв’язуємо...' : 'Відв’язати Telegram'}
+                                                                </button>
+                                                            </>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => void handleGenerateTelegramCode(acc)}
+                                                                disabled={generatingCode}
+                                                                className={cn(
+                                                                    'w-full flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors',
+                                                                    generatingCode
+                                                                        ? 'text-text-muted cursor-not-allowed'
+                                                                        : 'text-text-primary hover:bg-surface-50'
+                                                                )}
+                                                            >
+                                                                {generatingCode
+                                                                    ? <Loader2 size={14} className="animate-spin" />
+                                                                    : <MessageCircle size={14} />}
+                                                                {generatingCode
+                                                                    ? 'Генеруємо код...'
+                                                                    : pendingTelegramLink
+                                                                        ? 'Згенерувати новий код'
+                                                                        : 'Telegram'}
+                                                            </button>
+                                                        )}
+
+                                                        {telegramUi?.code && !acc.telegram_chat_id && (
+                                                            <div className="mx-3 my-1 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
+                                                                <p className="text-[11px] font-semibold text-brand-700">
+                                                                    Код: <span className="font-mono tracking-[0.12em]">{telegramUi.code}</span>
+                                                                </p>
+                                                                <p className="mt-1 text-[11px] leading-relaxed text-text-secondary">
+                                                                    Відправте <span className="font-mono">/start {telegramUi.code}</span>{' '}
+                                                                    {telegramUi.botUsername ? `боту @${telegramUi.botUsername}` : 'боту в Telegram'}.
+                                                                </p>
+                                                                <p className="mt-1 text-[10px] text-brand-700">
+                                                                    Очікуємо підтвердження від бухгалтера. Статус оновиться автоматично.
+                                                                </p>
+                                                                {telegramUi.expiresAt && (
+                                                                    <p className="mt-1 text-[10px] text-text-muted">
+                                                                        Діє до {formatTelegramExpiry(telegramUi.expiresAt)}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        {!telegramUi?.code && telegramUi?.notice && (
+                                                            <div className="mx-3 my-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+                                                                {telegramUi.notice}
+                                                            </div>
+                                                        )}
+
+                                                        {telegramUi?.error && (
+                                                            <div className="mx-3 my-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">
+                                                                {telegramUi.error}
+                                                            </div>
+                                                        )}
+
+                                                        <div className="border-t border-surface-100 my-1" />
+                                                        {acc.is_active ? (
+                                                            <button
+                                                                onClick={() => void handleDeactivate(acc.id)}
+                                                                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                                            >
+                                                                <UserX size={14} /> Деактивувати
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => void handleReactivate(acc.id)}
+                                                                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-text-primary hover:bg-surface-50 transition-colors"
+                                                            >
+                                                                <UserCheck size={14} /> Активувати
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={() => void handleDeleteProfile(acc)}
                                                             className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
                                                         >
-                                                            <UserX size={14} /> Деактивувати
+                                                            <Trash2 size={14} /> Видалити назавжди
                                                         </button>
-                                                    ) : (
-                                                        <div className="px-4 py-2.5 text-xs text-text-muted">
-                                                            <Shield size={12} className="inline mr-1" />
-                                                            Акаунт деактивовано
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
+                                                    </DropdownMenu.Content>
+                                                </DropdownMenu.Portal>
+                                            </DropdownMenu.Root>
                                         </div>
                                     </div>
                                 </div>
@@ -359,15 +798,17 @@ export default function TeamLoadPage() {
             )}
 
             {/* Accountant Form Modal */}
-            <AccountantFormModal
-                isOpen={showFormModal}
-                onClose={() => { setShowFormModal(false); setEditProfile(null); }}
-                editProfile={editProfile}
-            />
-
-            {/* Click outside to close menu */}
-            {menuOpenId && (
-                <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
+            {(showFormModal || Boolean(previewCredentials)) && (
+                <AccountantFormModal
+                    isOpen={showFormModal || Boolean(previewCredentials)}
+                    onClose={() => {
+                        setShowFormModal(false);
+                        setEditProfile(null);
+                        setPreviewCredentials(null);
+                    }}
+                    editProfile={editProfile}
+                    initialCredentials={previewCredentials}
+                />
             )}
         </div>
     );

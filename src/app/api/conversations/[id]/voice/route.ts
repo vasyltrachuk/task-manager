@@ -7,6 +7,33 @@ import { createTelegramBotClient } from '@/lib/server/telegram/bot-factory';
 
 export const runtime = 'nodejs';
 
+function normalizeAudioMimeType(value: string | null | undefined): string {
+  return (value ?? '').split(';')[0].trim().toLowerCase();
+}
+
+function extensionFromAudioMimeType(mimeType: string): string {
+  if (mimeType.includes('ogg')) return 'ogg';
+  if (mimeType.includes('webm')) return 'webm';
+  if (mimeType.includes('mp4') || mimeType.includes('m4a')) return 'm4a';
+  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3';
+  return 'ogg';
+}
+
+function isMissingDurationSecondsColumnError(
+  error: { code?: string; message?: string } | null | undefined
+): boolean {
+  if (!error) return false;
+
+  const message = (error.message ?? '').toLowerCase();
+  const hasDurationRef = message.includes('duration_seconds');
+  if (!hasDurationRef) return false;
+
+  return error.code === '42703'
+    || error.code === 'PGRST204'
+    || message.includes('column')
+    || message.includes('schema cache');
+}
+
 function mapContextError(error: unknown): NextResponse {
   const message = error instanceof Error ? error.message : 'Unknown error';
   if (message === 'UNAUTHENTICATED') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -38,7 +65,7 @@ export async function POST(
 
     if (contentType.startsWith('audio/') || contentType.includes('application/octet-stream')) {
       audioBuffer = Buffer.from(await request.arrayBuffer());
-      mimeType = contentType.split(';')[0].trim();
+      mimeType = normalizeAudioMimeType(contentType) || 'audio/ogg';
     } else {
       // multipart/form-data
       const formData = await request.formData();
@@ -48,7 +75,7 @@ export async function POST(
         return NextResponse.json({ error: 'Missing audio field' }, { status: 400 });
       }
       audioBuffer = Buffer.from(await audioFile.arrayBuffer());
-      mimeType = audioFile.type || 'audio/ogg';
+      mimeType = normalizeAudioMimeType(audioFile.type) || 'audio/ogg';
       durationSeconds = durationRaw ? Number(durationRaw) : null;
     }
 
@@ -116,7 +143,7 @@ export async function POST(
     }
 
     // ── Logical storage_path (access-control key only, no actual file) ───────
-    const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('webm') ? 'webm' : 'ogg';
+    const ext = extensionFromAudioMimeType(mimeType);
     const fileName = sanitizeFileName(`voice_${Date.now()}.${ext}`);
     const storagePath = `${ctx.tenantId}/tg/${conversationId}_${fileName}`;
 
@@ -155,7 +182,31 @@ export async function POST(
     if (durationSeconds != null) {
       attachmentPayload.duration_seconds = durationSeconds;
     }
-    await supabaseAdmin.from('message_attachments').insert(attachmentPayload);
+    let attachmentInsert = await supabaseAdmin
+      .from('message_attachments')
+      .insert(attachmentPayload)
+      .select('id')
+      .single();
+
+    if (
+      attachmentInsert.error
+      && attachmentPayload.duration_seconds != null
+      && isMissingDurationSecondsColumnError(attachmentInsert.error)
+    ) {
+      delete attachmentPayload.duration_seconds;
+      attachmentInsert = await supabaseAdmin
+        .from('message_attachments')
+        .insert(attachmentPayload)
+        .select('id')
+        .single();
+    }
+
+    if (attachmentInsert.error || !attachmentInsert.data?.id) {
+      return NextResponse.json(
+        { error: attachmentInsert.error?.message ?? 'Failed to save voice attachment' },
+        { status: 500 }
+      );
+    }
 
     await supabaseAdmin
       .from('conversations')

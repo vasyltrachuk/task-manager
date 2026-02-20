@@ -1,4 +1,5 @@
 import { Client, ClientType } from './types';
+import { formatShortName } from './utils';
 
 const CLIENT_TYPE_TITLE_PREFIXES: Record<ClientType, string> = {
     FOP: 'ФОП',
@@ -63,4 +64,13 @@ export function getClientDisplayName(client: Pick<Client, 'name' | 'type'>): str
     const prefix = getClientTypeTitlePrefix(client.type);
 
     return normalizedName ? `${prefix} ${normalizedName}` : prefix;
+}
+
+/** Скорочена назва: для ФОП скорочує ПІБ до «Прізвище І.Б.», для решти — повна назва. */
+export function getClientShortDisplayName(client: Pick<Client, 'name' | 'type'>): string {
+    const normalizedName = normalizeClientName(client.name);
+    const prefix = getClientTypeTitlePrefix(client.type);
+    const displayName = client.type === 'FOP' ? formatShortName(normalizedName) : normalizedName;
+
+    return displayName ? `${prefix} ${displayName}` : prefix;
 }

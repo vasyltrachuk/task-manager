@@ -1,12 +1,97 @@
 'use client';
 
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { Check, Clock, AlertCircle, Paperclip, Mic, Loader2, Play, Pause, X } from 'lucide-react';
 import { cn, formatTime } from '@/lib/utils';
 import type { ConversationMessageWithAttachments, MessageAttachment } from '@/lib/types';
 
 interface MessageBubbleProps {
   message: ConversationMessageWithAttachments;
+}
+
+const WAVEFORM_BARS = 48;
+const WAVEFORM_VIEWBOX_WIDTH = 190;
+const WAVEFORM_VIEWBOX_HEIGHT = 23;
+const WAVEFORM_BAR_WIDTH = 2;
+const WAVEFORM_BAR_GAP = 2;
+const FALLBACK_WAVEFORM = Array.from({ length: WAVEFORM_BARS }, (_, i) =>
+  // Gentle arch fallback when decoding is unavailable.
+  0.25 + Math.sin((i / (WAVEFORM_BARS - 1)) * Math.PI) * 0.45
+);
+const waveformCache = new Map<string, number[]>();
+const waveformInFlight = new Map<string, Promise<number[]>>();
+
+function getAudioContextCtor():
+  | (new () => AudioContext)
+  | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.AudioContext;
+}
+
+async function decodeWaveform(src: string): Promise<number[]> {
+  const response = await fetch(src, { cache: 'force-cache' });
+  if (!response.ok) {
+    throw new Error(`Waveform fetch failed: ${response.status}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const AudioContextCtor = getAudioContextCtor();
+  if (!AudioContextCtor) {
+    return FALLBACK_WAVEFORM;
+  }
+
+  const ctx = new AudioContextCtor();
+  try {
+    const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
+    const channels = decoded.numberOfChannels;
+    if (channels <= 0 || decoded.length <= 0) {
+      return FALLBACK_WAVEFORM;
+    }
+
+    const bars = Array.from({ length: WAVEFORM_BARS }, () => 0);
+    const chunkSize = Math.max(1, Math.floor(decoded.length / WAVEFORM_BARS));
+
+    for (let bar = 0; bar < WAVEFORM_BARS; bar += 1) {
+      const start = bar * chunkSize;
+      const end = Math.min(decoded.length, start + chunkSize);
+      let peak = 0;
+
+      for (let ch = 0; ch < channels; ch += 1) {
+        const data = decoded.getChannelData(ch);
+        for (let i = start; i < end; i += 1) {
+          const sample = Math.abs(data[i] ?? 0);
+          if (sample > peak) peak = sample;
+        }
+      }
+
+      bars[bar] = peak;
+    }
+
+    const maxPeak = Math.max(...bars, 0);
+    if (maxPeak <= 0) {
+      return FALLBACK_WAVEFORM;
+    }
+
+    return bars.map((value) => Math.max(0.12, value / maxPeak));
+  } finally {
+    await ctx.close().catch(() => undefined);
+  }
+}
+
+async function getWaveform(src: string): Promise<number[]> {
+  const cached = waveformCache.get(src);
+  if (cached) return cached;
+
+  let inFlight = waveformInFlight.get(src);
+  if (!inFlight) {
+    inFlight = decodeWaveform(src).catch(() => FALLBACK_WAVEFORM);
+    waveformInFlight.set(src, inFlight);
+  }
+
+  const bars = await inFlight;
+  waveformInFlight.delete(src);
+  waveformCache.set(src, bars);
+  return bars;
 }
 
 function DeliveryIcon({ status }: { status: string }) {
@@ -41,7 +126,10 @@ function isVoiceLike(att: MessageAttachment): boolean {
 }
 
 function isPending(att: MessageAttachment): boolean {
-  return att.storage_path.includes('/pending/');
+  if (!att.storage_path.includes('/pending/')) return false;
+  // Telegram attachments can be streamed by telegram_file_id even before background
+  // job rewrites storage_path from /pending/ to /tg/.
+  return !att.telegram_file_id;
 }
 
 // ── Custom audio player ────────────────────────────────────────────────────
@@ -61,6 +149,23 @@ function VoicePlayer({
   const [currentSec, setCurrentSec] = useState(0);
   const [totalSec, setTotalSec] = useState(durationSeconds ?? 0);
   const [loading, setLoading] = useState(false);
+  const [waveform, setWaveform] = useState<number[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getWaveform(src)
+      .then((bars) => {
+        if (!cancelled) setWaveform(bars);
+      })
+      .catch(() => {
+        if (!cancelled) setWaveform(FALLBACK_WAVEFORM);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
 
   // Lazily create audio element
   const getAudio = useCallback(() => {
@@ -129,12 +234,34 @@ function VoicePlayer({
   const displayTotal = totalSec || durationSeconds || 0;
   const displayCurrent = playing || progress > 0 ? currentSec : null;
 
-  const trackBg = isOutbound ? 'bg-white/20' : 'bg-surface-200';
-  const fillBg = isOutbound ? 'bg-white' : 'bg-brand-500';
-  const thumbBg = isOutbound ? 'bg-white' : 'bg-brand-600';
   const btnBg = isOutbound ? 'bg-white/20 hover:bg-white/30' : 'bg-brand-100 hover:bg-brand-200';
   const iconColor = isOutbound ? 'text-white' : 'text-brand-600';
   const timeColor = isOutbound ? 'text-white/60' : 'text-text-muted';
+  const bars = waveform ?? FALLBACK_WAVEFORM;
+  const progressPct = Math.max(0, Math.min(100, progress * 100));
+  const waveBackgroundColor = isOutbound ? 'text-white/35' : 'text-surface-300';
+  const waveProgressColor = isOutbound ? 'text-white' : 'text-brand-500';
+  const waveformRects = useMemo(() =>
+    bars.map((peak, index) => {
+      const x = index * (WAVEFORM_BAR_WIDTH + WAVEFORM_BAR_GAP);
+      const barHeight = Math.round(4 + peak * 19);
+      const y = WAVEFORM_VIEWBOX_HEIGHT - barHeight;
+      return (
+        <rect
+          key={`wave-${index}`}
+          className="audio-waveform-bar"
+          x={x}
+          y={y}
+          width={WAVEFORM_BAR_WIDTH}
+          height={barHeight}
+          rx={1}
+          ry={1}
+          fill="currentColor"
+        />
+      );
+    }),
+    [bars]
+  );
 
   return (
     <div className="flex items-center gap-2.5 w-full min-w-[200px] max-w-[260px]">
@@ -154,21 +281,41 @@ function VoicePlayer({
         }
       </button>
 
-      {/* Waveform / progress bar */}
+      {/* Waveform */}
       <div className="flex-1 flex flex-col gap-1">
         <div
-          className={cn('relative h-1.5 rounded-full cursor-pointer', trackBg)}
+          className={cn(
+            'audio-waveform-container w-[190px] max-w-full rounded-md cursor-pointer',
+            isOutbound ? 'bg-white/12' : 'bg-surface-100'
+          )}
           onClick={handleSeek}
         >
+          <div className={cn('audio-waveform audio-waveform-background', waveBackgroundColor)}>
+            <svg
+              className="audio-waveform-bars"
+              width={WAVEFORM_VIEWBOX_WIDTH}
+              height={WAVEFORM_VIEWBOX_HEIGHT}
+              viewBox={`0 0 ${WAVEFORM_VIEWBOX_WIDTH} ${WAVEFORM_VIEWBOX_HEIGHT}`}
+              aria-hidden="true"
+            >
+              {waveformRects}
+            </svg>
+          </div>
+
           <div
-            className={cn('absolute inset-y-0 left-0 rounded-full transition-all', fillBg)}
-            style={{ width: `${progress * 100}%` }}
-          />
-          {/* Thumb dot */}
-          <div
-            className={cn('absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full shadow-sm transition-all', thumbBg)}
-            style={{ left: `calc(${progress * 100}% - 5px)` }}
-          />
+            className={cn('audio-waveform audio-waveform-fake', waveProgressColor)}
+            style={{ width: `${progressPct}%` }}
+          >
+            <svg
+              className="audio-waveform-bars"
+              width={WAVEFORM_VIEWBOX_WIDTH}
+              height={WAVEFORM_VIEWBOX_HEIGHT}
+              viewBox={`0 0 ${WAVEFORM_VIEWBOX_WIDTH} ${WAVEFORM_VIEWBOX_HEIGHT}`}
+              aria-hidden="true"
+            >
+              {waveformRects}
+            </svg>
+          </div>
         </div>
         <span className={cn('text-[10px] tabular-nums leading-none', timeColor)}>
           {displayCurrent != null ? formatDuration(displayCurrent) : formatDuration(displayTotal)}
@@ -217,28 +364,65 @@ function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
 
 function ImageAttachment({ src }: { src: string }) {
   const [lightbox, setLightbox] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const canOpen = loaded && !failed;
+  const openLightbox = () => {
+    if (!canOpen) return;
+    setLightbox(true);
+  };
 
   return (
     <>
       <div
         role="button"
         tabIndex={0}
+        aria-disabled={!canOpen}
         aria-label="Переглянути зображення"
-        onClick={() => setLightbox(true)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setLightbox(true); }}
-        className="relative cursor-pointer rounded-[4px] mx-auto hover:brightness-90 transition-[filter] duration-400"
-        style={{
-          backgroundImage: `url(${src})`,
-          backgroundSize: 'cover',
-          backgroundPosition: '50%',
-          backgroundRepeat: 'no-repeat',
-          height: 250,
-          width: 250,
-          maxWidth: '100%',
-          margin: '4px auto 5px',
+        onClick={openLightbox}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') openLightbox();
         }}
-      />
-      {lightbox && <ImageLightbox src={src} onClose={() => setLightbox(false)} />}
+        className={cn(
+          'relative mx-auto h-[250px] w-[250px] max-w-full overflow-hidden rounded-[4px] transition-[filter] duration-300',
+          canOpen ? 'cursor-pointer hover:brightness-90' : 'cursor-default'
+        )}
+      >
+        {!loaded && !failed && (
+          <div className="pointer-events-none absolute inset-0 rounded-[4px] bg-gradient-to-br from-surface-100 via-surface-50 to-surface-100 animate-pulse" />
+        )}
+
+        {!loaded && !failed && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <Loader2 size={18} className="animate-spin text-text-muted" />
+          </div>
+        )}
+
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          onLoad={() => setLoaded(true)}
+          onError={() => {
+            setFailed(true);
+            setLoaded(false);
+          }}
+          className={cn(
+            'h-full w-full object-cover transition-opacity duration-300',
+            loaded && !failed ? 'opacity-100' : 'opacity-0'
+          )}
+        />
+
+        {failed && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-100 text-[11px] text-text-muted">
+            Не вдалося завантажити
+          </div>
+        )}
+      </div>
+
+      {lightbox && canOpen && <ImageLightbox src={src} onClose={() => setLightbox(false)} />}
     </>
   );
 }

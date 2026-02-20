@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { MessageSquare, Search } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
@@ -8,18 +8,21 @@ import { canAccessInbox } from '@/lib/rbac';
 import AccessDeniedCard from '@/components/ui/access-denied-card';
 import ConversationListItem from '@/components/inbox/conversation-list-item';
 import ChatView from '@/components/inbox/chat-view';
+import ConversationClientPanel from '@/components/inbox/conversation-client-panel';
 import { useConversations } from '@/lib/hooks/use-conversations';
-import { CONVERSATION_STATUS_LABELS } from '@/lib/types';
 import type { ConversationStatus } from '@/lib/types';
-import { getContactName } from '@/components/inbox/conversation-list-item';
+import {
+  getContactName,
+  getConversationLastMessagePreview,
+} from '@/components/inbox/conversation-list-item';
 
 type StatusFilter = 'all' | ConversationStatus;
 
 const statusFilters: { value: StatusFilter; label: string }[] = [
+  { value: 'open', label: 'Відкриті' },
+  { value: 'closed', label: 'Закриті' },
   { value: 'all', label: 'Усі' },
-  { value: 'open', label: CONVERSATION_STATUS_LABELS.open },
-  { value: 'closed', label: CONVERSATION_STATUS_LABELS.closed },
-  { value: 'archived', label: CONVERSATION_STATUS_LABELS.archived },
+  { value: 'archived', label: 'Архів' },
 ];
 
 export default function InboxPage() {
@@ -28,23 +31,37 @@ export default function InboxPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [myOnly, setMyOnly] = useState(false);
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedConversationIdState, setSelectedConversationId] = useState<string | null>(null);
 
-  const queryFilters = useMemo(
-    () => ({
-      status: statusFilter === 'all' ? undefined : statusFilter,
-      unreadOnly,
-    }),
-    [statusFilter, unreadOnly]
-  );
+  const { data: conversations, isLoading, isError, error } = useConversations();
 
-  const { data: conversations, isLoading, isError, error } = useConversations(queryFilters);
+  const scopedConversations = useMemo(() => {
+    return (conversations ?? []).filter((conversation) => {
+      if (!myOnly || !profile) return true;
+      return conversation.assigned_accountant_id === profile.id;
+    });
+  }, [conversations, myOnly, profile]);
+
+  const statusCounts = useMemo(() => {
+    return scopedConversations.reduce(
+      (acc, conversation) => {
+        acc.all += 1;
+        acc[conversation.status] += 1;
+        return acc;
+      },
+      { all: 0, open: 0, closed: 0, archived: 0 }
+    );
+  }, [scopedConversations]);
 
   const filteredConversations = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
-    return (conversations ?? []).filter((conversation) => {
-      if (myOnly && profile && conversation.assigned_accountant_id !== profile.id) {
+    return scopedConversations.filter((conversation) => {
+      if (statusFilter !== 'all' && conversation.status !== statusFilter) {
+        return false;
+      }
+
+      if (unreadOnly && conversation.unread_count <= 0) {
         return false;
       }
 
@@ -53,24 +70,36 @@ export default function InboxPage() {
       const contactName = getContactName(conversation).toLowerCase();
       const username = conversation.telegram_contact?.username?.toLowerCase() ?? '';
       const clientName = conversation.client?.name?.toLowerCase() ?? '';
+      const lastPreview = getConversationLastMessagePreview(conversation).toLowerCase();
 
-      return contactName.includes(query) || username.includes(query) || clientName.includes(query);
+      return (
+        contactName.includes(query) ||
+        username.includes(query) ||
+        clientName.includes(query) ||
+        lastPreview.includes(query)
+      );
     });
-  }, [conversations, myOnly, profile, searchQuery]);
+  }, [scopedConversations, statusFilter, unreadOnly, searchQuery]);
 
-  useEffect(() => {
-    if (filteredConversations.length === 0) {
-      setSelectedConversationId(null);
-      return;
-    }
-
+  const selectedConversationId = useMemo(() => {
+    if (filteredConversations.length === 0) return null;
     if (
-      !selectedConversationId ||
-      !filteredConversations.some((conversation) => conversation.id === selectedConversationId)
+      selectedConversationIdState &&
+      filteredConversations.some((conversation) => conversation.id === selectedConversationIdState)
     ) {
-      setSelectedConversationId(filteredConversations[0].id);
+      return selectedConversationIdState;
     }
-  }, [filteredConversations, selectedConversationId]);
+
+    return filteredConversations[0].id;
+  }, [filteredConversations, selectedConversationIdState]);
+
+  const selectedConversation = useMemo(
+    () =>
+      selectedConversationId
+        ? (conversations ?? []).find((conversation) => conversation.id === selectedConversationId) ?? null
+        : null,
+    [conversations, selectedConversationId]
+  );
 
   if (!profile) return null;
 
@@ -78,62 +107,81 @@ export default function InboxPage() {
     return <AccessDeniedCard message="У вас немає доступу до розділу повідомлень." />;
   }
 
-  const unreadTotal = (conversations ?? []).reduce(
+  const unreadTotal = (scopedConversations ?? []).reduce(
     (sum, conversation) => sum + (conversation.unread_count ?? 0),
     0
   );
 
   return (
-    <div className="p-6 h-screen flex flex-col">
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-text-primary">Повідомлення</h1>
-        <p className="text-sm text-text-muted mt-1">
-          Діалоги з клієнтами в Telegram. Непрочитаних: {unreadTotal}
-        </p>
-      </div>
+    <div className="p-4 md:p-6 h-screen min-h-0">
+      <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)_320px] gap-4 h-full min-h-0">
+        <aside className="card overflow-hidden flex flex-col min-h-0 h-full">
+          <div className="px-4 py-4 border-b border-surface-200 bg-surface-50">
+            <h1 className="text-xl font-bold text-text-primary">Чати</h1>
+          </div>
 
-      <div className="flex items-center gap-3 mb-3 flex-wrap">
-        <div className="relative w-full md:w-80">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Пошук за контактом або клієнтом..."
-            className="w-full pl-9 pr-4 py-2 bg-white border border-surface-200 rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400 transition-all"
-          />
-        </div>
-      </div>
+          <div className="p-4 border-b border-surface-200 space-y-3">
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Пошук за контактом або клієнтом..."
+                className="w-full pl-9 pr-4 py-2 bg-white border border-surface-200 rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400 transition-all"
+              />
+            </div>
 
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
-        {statusFilters.map((filter) => (
-          <button
-            key={filter.value}
-            onClick={() => setStatusFilter(filter.value)}
-            className={cn('filter-pill', statusFilter === filter.value && 'active')}
-          >
-            {filter.label}
-          </button>
-        ))}
-        <button
-          onClick={() => setUnreadOnly((prev) => !prev)}
-          className={cn('filter-pill', unreadOnly && 'active')}
-        >
-          Непрочитані
-        </button>
-        <button
-          onClick={() => setMyOnly((prev) => !prev)}
-          className={cn('filter-pill', myOnly && 'active')}
-        >
-          Мої
-        </button>
-      </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setUnreadOnly((prev) => !prev)}
+                className={cn('filter-pill', unreadOnly && 'active')}
+              >
+                Непрочитані
+              </button>
+              <button
+                onClick={() => setMyOnly((prev) => !prev)}
+                className={cn('filter-pill', myOnly && 'active')}
+              >
+                Мої
+              </button>
+            </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[340px_minmax(0,1fr)] gap-4 flex-1 min-h-0">
-        <div className="card overflow-hidden flex flex-col min-h-0">
-          <div className="px-4 py-3 border-b border-surface-200 bg-surface-50 flex items-center justify-between">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              {statusFilters.map((filter) => {
+                const count = statusCounts[filter.value];
+                const isActive = statusFilter === filter.value;
+                return (
+                  <button
+                    key={filter.value}
+                    onClick={() => setStatusFilter(filter.value)}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium whitespace-nowrap transition-colors',
+                      isActive
+                        ? 'bg-brand-600 text-white border-brand-600'
+                        : 'bg-white text-text-secondary border-surface-200 hover:border-brand-300 hover:text-brand-700'
+                    )}
+                  >
+                    <span>{filter.label}</span>
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+                        isActive ? 'bg-white/20 text-white' : 'bg-surface-100 text-text-muted'
+                      )}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="px-4 py-2 border-b border-surface-200 bg-surface-50 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-text-primary">Бесіди</h2>
-            <span className="text-xs text-text-muted">{filteredConversations.length}</span>
+            <span className="text-xs text-text-muted">
+              {filteredConversations.length}/{scopedConversations.length}
+            </span>
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -164,12 +212,13 @@ export default function InboxPage() {
                 conversation={conversation}
                 isSelected={selectedConversationId === conversation.id}
                 onClick={() => setSelectedConversationId(conversation.id)}
+                showAssignedAccountant={profile.role === 'admin'}
               />
             ))}
           </div>
-        </div>
+        </aside>
 
-        <div className="card overflow-hidden min-h-0 flex">
+        <div className="card overflow-hidden min-h-0 h-full flex">
           {selectedConversationId ? (
             <ChatView conversationId={selectedConversationId} />
           ) : (
@@ -181,6 +230,8 @@ export default function InboxPage() {
             </div>
           )}
         </div>
+
+        <ConversationClientPanel conversation={selectedConversation} />
       </div>
     </div>
   );

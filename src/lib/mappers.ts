@@ -4,8 +4,9 @@ import type {
   License, BillingPlan, Invoice, Payment, PaymentAllocation,
   ActivityLogEntry, TaxRulebookConfig,
   ConversationListItem, ConversationMessageWithAttachments,
-  ClientDocument, MessageAttachment,
+  ClientDocument, MessageAttachment, ConversationMessagePreview,
   UserRole, ClientType, ClientTaxIdType, ClientStatus, TaxSystem,
+  ClientAvatarSource,
   IncomeLimitSource, TaskStatus, TaskType, TaskPriority, RecurrenceType,
   LicenseType, LicenseStatus, LicensePaymentFrequency, LicenseCheckResult,
   BillingPlanCadence, BillingCurrency, InvoiceStatus, PaymentStatus, PaymentMethod,
@@ -40,6 +41,7 @@ export function mapDbProfile(row: DbProfile): Profile {
     avatar_url: row.avatar_url ?? undefined,
     is_active: row.is_active,
     created_at: row.created_at,
+    telegram_chat_id: row.telegram_chat_id ?? null,
   };
 }
 
@@ -48,8 +50,11 @@ export function mapDbProfile(row: DbProfile): Profile {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function mapDbClient(row: DbClient, joinedAccountants?: any[]): Client {
   const accountants: Profile[] | undefined = joinedAccountants
-    ? joinedAccountants
+    ? [...joinedAccountants]
         .filter((ca: { profile: DbProfile | null }) => ca.profile)
+        .sort((left: { is_primary?: boolean | null }, right: { is_primary?: boolean | null }) =>
+          Number(Boolean(right.is_primary)) - Number(Boolean(left.is_primary))
+        )
         .map((ca: { profile: DbProfile }) => mapDbProfile(ca.profile))
     : undefined;
 
@@ -69,6 +74,10 @@ export function mapDbClient(row: DbClient, joinedAccountants?: any[]): Client {
     employee_count: row.employee_count ?? undefined,
     industry: row.industry ?? undefined,
     notes: row.notes ?? undefined,
+    avatar_source: (row.avatar_source as ClientAvatarSource) ?? undefined,
+    avatar_url: row.avatar_url ?? undefined,
+    avatar_telegram_file_id: row.avatar_telegram_file_id ?? undefined,
+    avatar_updated_at: row.avatar_updated_at ?? undefined,
     created_at: row.created_at,
     updated_at: row.updated_at,
     accountants,
@@ -272,6 +281,23 @@ export function mapDbAuditEntry(
 // ── Conversations ────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapDbConversationPreview(row: any): ConversationMessagePreview | null {
+  const raw = Array.isArray(row?.last_message) ? row.last_message[0] : row?.last_message;
+  if (!raw) return null;
+
+  return {
+    id: raw.id,
+    body: raw.body ?? null,
+    direction: raw.direction as MessageDirection,
+    created_at: raw.created_at,
+    attachments: (raw.message_attachments ?? []).map((att: { file_name?: string | null; mime?: string | null }) => ({
+      file_name: att.file_name ?? 'attachment',
+      mime: att.mime ?? null,
+    })),
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function mapDbConversationListItem(row: any): ConversationListItem {
   const telegramContact = row.telegram_contact
     ? {
@@ -291,9 +317,10 @@ export function mapDbConversationListItem(row: any): ConversationListItem {
     unread_count: row.unread_count ?? 0,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    client: row.client ? mapDbClient(row.client) : null,
+    client: row.client ? mapDbClient(row.client, row.client.client_accountants) : null,
     telegram_contact: telegramContact,
     assigned_accountant: row.assigned_accountant ? mapDbProfile(row.assigned_accountant) : null,
+    last_message: mapDbConversationPreview(row),
   };
 }
 

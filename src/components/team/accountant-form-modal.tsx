@@ -19,27 +19,41 @@ import { Profile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useCreateProfile, useUpdateProfile } from '@/lib/hooks/use-profiles';
 
+export interface AccountantCredentials {
+    login: string;
+    password: string;
+    name: string;
+    context?: 'created' | 'reset';
+}
+
 interface AccountantFormModalProps {
     isOpen: boolean;
     onClose: () => void;
     editProfile?: Profile | null;
+    initialCredentials?: AccountantCredentials | null;
 }
 
-export default function AccountantFormModal({ isOpen, onClose, editProfile }: AccountantFormModalProps) {
+export default function AccountantFormModal({
+    isOpen,
+    onClose,
+    editProfile,
+    initialCredentials,
+}: AccountantFormModalProps) {
     const createProfileMutation = useCreateProfile();
     const updateProfileMutation = useUpdateProfile();
+    const editProfileFullName = editProfile?.full_name || '';
+    const editProfilePhone = editProfile?.phone || '';
+    const editProfileEmail = editProfile?.email || '';
 
-    const [fullName, setFullName] = useState(editProfile?.full_name || '');
-    const [phone, setPhone] = useState(editProfile?.phone || '');
-    const [email, setEmail] = useState(editProfile?.email || '');
+    const [fullName, setFullName] = useState(editProfileFullName);
+    const [phone, setPhone] = useState(editProfilePhone);
+    const [email, setEmail] = useState(editProfileEmail);
     const [errors, setErrors] = useState<Record<string, string>>({});
 
     // Show generated credentials after creation
-    const [createdCredentials, setCreatedCredentials] = useState<{
-        login: string;
-        password: string;
-        name: string;
-    } | null>(null);
+    const [createdCredentials, setCreatedCredentials] = useState<AccountantCredentials | null>(
+        initialCredentials ? { ...initialCredentials } : null
+    );
     const [copiedField, setCopiedField] = useState<string | null>(null);
     const [showPassword, setShowPassword] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
@@ -104,6 +118,7 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                     login: result.email || email.trim(),
                     password: result.generated_password || '',
                     name: fullName.trim(),
+                    context: 'created',
                 });
             } catch (error) {
                 setSubmitError(getMutationErrorMessage(error));
@@ -137,6 +152,8 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
     };
 
     const isSubmitting = createProfileMutation.isPending || updateProfileMutation.isPending;
+    const pendingSubmitLabel = editProfile ? 'Збереження...' : 'Створення...';
+    const idleSubmitLabel = editProfile ? 'Зберегти' : 'Створити та згенерувати пароль';
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -184,9 +201,15 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-3">
                                 <ShieldCheck size={20} className="text-emerald-600 flex-shrink-0 mt-0.5" />
                                 <div>
-                                    <p className="text-sm font-semibold text-emerald-800">Акаунт створено успішно!</p>
+                                    <p className="text-sm font-semibold text-emerald-800">
+                                        {createdCredentials.context === 'reset'
+                                            ? 'Пароль оновлено успішно!'
+                                            : 'Акаунт створено успішно!'}
+                                    </p>
                                     <p className="text-xs text-emerald-600 mt-0.5">
-                                        Скопіюйте дані нижче та передайте бухгалтеру <strong>{createdCredentials.name}</strong>
+                                        {createdCredentials.context === 'reset'
+                                            ? <>Скопіюйте нові дані нижче та передайте бухгалтеру <strong>{createdCredentials.name}</strong></>
+                                            : <>Скопіюйте дані нижче та передайте бухгалтеру <strong>{createdCredentials.name}</strong></>}
                                     </p>
                                 </div>
                             </div>
@@ -261,8 +284,9 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                             </button>
 
                             <p className="text-[11px] text-text-muted text-center leading-relaxed">
-                                ⚠️ Пароль показується тільки один раз. Після закриття вікна ви зможете
-                                згенерувати новий пароль через кнопку «Перегенерувати пароль».
+                                {createdCredentials.context === 'reset'
+                                    ? 'Попередній пароль більше не діє. Передайте бухгалтеру тільки новий пароль із цього вікна.'
+                                    : 'Пароль показується тільки один раз. Після закриття вікна ви зможете згенерувати новий пароль через кнопку «Перегенерувати пароль».'}
                             </p>
                         </div>
                     ) : (
@@ -368,12 +392,17 @@ export default function AccountantFormModal({ isOpen, onClose, editProfile }: Ac
                             <button
                                 onClick={handleSubmit}
                                 disabled={isSubmitting}
+                                translate="no"
                                 className="flex items-center gap-2 px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
                             >
-                                {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : <Key size={16} />}
-                                {isSubmitting
-                                    ? editProfile ? 'Збереження...' : 'Створення...'
-                                    : editProfile ? 'Зберегти' : 'Створити та згенерувати пароль'}
+                                <span className={isSubmitting ? 'inline-flex items-center justify-center' : 'hidden'}>
+                                    <Loader2 size={16} className="animate-spin" />
+                                </span>
+                                <span className={isSubmitting ? 'hidden' : 'inline-flex items-center justify-center'}>
+                                    <Key size={16} />
+                                </span>
+                                <span translate="no" className={isSubmitting ? '' : 'hidden'}>{pendingSubmitLabel}</span>
+                                <span translate="no" className={isSubmitting ? 'hidden' : ''}>{idleSubmitLabel}</span>
                             </button>
                         </>
                     )}

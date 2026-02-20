@@ -239,6 +239,41 @@
     color: var(--color-brand-600);
   }
 
+  /* Audio waveform (Telegram-like layering) */
+  .audio-waveform-container {
+    position: relative;
+    height: 23px;
+    margin-top: 1px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+  }
+
+  .audio-waveform {
+    height: 100%;
+  }
+
+  .audio-waveform-bars {
+    display: block;
+  }
+
+  .audio-waveform-bar {
+    fill: currentColor;
+  }
+
+  .audio-waveform-background .audio-waveform-bar {
+    opacity: 0.3;
+  }
+
+  .audio-waveform-fake {
+    position: absolute;
+    inset: 0;
+    width: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transition: width 75ms linear;
+  }
+
   /* Sidebar */
   .sidebar {
     position: fixed;

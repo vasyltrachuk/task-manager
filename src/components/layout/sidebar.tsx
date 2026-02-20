@@ -11,14 +11,14 @@ import {
     MessageSquare,
     ShieldCheck,
     Wallet,
-    BarChart3,
+    UserRoundCog,
     Settings,
     Plug,
     LogOut,
     PanelLeftOpen,
     PanelLeftClose,
 } from 'lucide-react';
-import { cn, getInitials } from '@/lib/utils';
+import { cn, getInitials, formatShortName } from '@/lib/utils';
 import { USER_ROLE_LABELS } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
@@ -36,16 +36,16 @@ const adminNavItems: NavItem[] = [
     { href: '/', label: 'Огляд', icon: LayoutDashboard },
     { href: '/clients', label: 'Клієнти', icon: Users },
     { href: '/tasks', label: 'Завдання', icon: KanbanSquare },
-    { href: '/inbox', label: 'Повідомлення', icon: MessageSquare },
+    { href: '/inbox', label: 'Чати', icon: MessageSquare },
     { href: '/licenses', label: 'Ліцензії', icon: ShieldCheck },
     { href: '/billing', label: 'Оплати', icon: Wallet },
-    { href: '/team', label: 'Команда', icon: BarChart3 },
+    { href: '/team', label: 'Команда', icon: UserRoundCog },
 ];
 
 const accountantNavItems: NavItem[] = [
     { href: '/clients', label: 'Клієнти', icon: Users },
     { href: '/tasks', label: 'Завдання', icon: KanbanSquare },
-    { href: '/inbox', label: 'Повідомлення', icon: MessageSquare },
+    { href: '/inbox', label: 'Чати', icon: MessageSquare },
     { href: '/billing', label: 'Оплати', icon: Wallet },
 ];
 
@@ -64,7 +64,7 @@ interface Tooltip {
     visible: boolean;
 }
 
-const subscribe = () => () => {};
+const subscribe = () => () => { };
 
 function SidebarTooltip({
     label,
@@ -263,7 +263,7 @@ export default function Sidebar() {
                         {isExpanded && (
                             <>
                                 <div className="flex-1 text-left min-w-0">
-                                    <div className="text-sm font-semibold text-text-primary truncate">{profile.full_name}</div>
+                                    <div className="text-sm font-semibold text-text-primary truncate">{formatShortName(profile.full_name)}</div>
                                     <div className="text-[11px] text-text-muted capitalize">{USER_ROLE_LABELS[profile.role]}</div>
                                 </div>
                                 <button

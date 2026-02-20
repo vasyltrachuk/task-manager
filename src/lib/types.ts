@@ -2,6 +2,7 @@
 export type UserRole = 'admin' | 'accountant' | 'lawyer' | 'hr' | 'auditor' | 'manager';
 
 export type ClientType = 'FOP' | 'LLC' | 'OSBB' | 'NGO' | 'GRANT';
+export type ClientAvatarSource = 'manual' | 'telegram' | 'instagram' | 'viber';
 
 export type ClientStatus = 'active' | 'onboarding' | 'archived';
 export type ClientTaxIdType = 'rnokpp' | 'edrpou';
@@ -80,6 +81,8 @@ export interface Profile {
   // Auto-generated credentials (admin creates, shares with accountant)
   generated_password?: string;
   password_changed?: boolean;
+  // Staff Telegram linking
+  telegram_chat_id?: number | null;
 }
 
 export interface Client {
@@ -98,6 +101,10 @@ export interface Client {
   employee_count?: number;
   industry?: string;
   notes?: string;
+  avatar_source?: ClientAvatarSource;
+  avatar_url?: string;
+  avatar_telegram_file_id?: string;
+  avatar_updated_at?: string;
   created_at: string;
   updated_at: string;
   // Virtual / joined
@@ -170,11 +177,25 @@ export interface ConversationListItem extends Conversation {
   client?: Client | null;
   telegram_contact?: TelegramContactInfo | null;
   assigned_accountant?: Profile | null;
+  last_message?: ConversationMessagePreview | null;
 }
 
 export interface ConversationMessageWithAttachments extends ConversationMessage {
   attachments?: MessageAttachment[];
   sender?: Profile | null;
+}
+
+export interface ConversationMessagePreviewAttachment {
+  file_name: string;
+  mime?: string | null;
+}
+
+export interface ConversationMessagePreview {
+  id: string;
+  body?: string | null;
+  direction: MessageDirection;
+  created_at: string;
+  attachments: ConversationMessagePreviewAttachment[];
 }
 
 export interface License {

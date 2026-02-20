@@ -33,6 +33,22 @@ async function markRawInboundResult(input: {
     .eq('update_id', input.updateId);
 }
 
+function formatQueueError(error: unknown): string {
+  if (error instanceof Error) {
+    const stack = typeof error.stack === 'string' ? error.stack : '';
+    const combined = stack && stack.includes(error.message)
+      ? stack
+      : `${error.message}${stack ? `\n${stack}` : ''}`;
+    return combined.slice(0, 8000);
+  }
+
+  if (typeof error === 'string') {
+    return error.slice(0, 8000);
+  }
+
+  return 'Unknown queue processing error';
+}
+
 async function handleInboundProcess(payload: InboundProcessJob): Promise<void> {
   try {
     const result = await processInboundUpdate(payload);
@@ -53,7 +69,7 @@ async function handleInboundProcess(payload: InboundProcessJob): Promise<void> {
       await markRawInboundResult({
         botId: payload.botId,
         updateId: payload.updateId,
-        error: error instanceof Error ? error.message : 'Unknown inbound processing error',
+        error: formatQueueError(error),
       });
     } catch {
       // Don't mask the original error if DB write also fails
@@ -87,7 +103,7 @@ async function handleOutboundSend(payload: OutboundSendJob): Promise<void> {
   } catch (error) {
     await markOutboundFailed(
       payload,
-      error instanceof Error ? error.message : 'Unknown outbound processing error'
+      formatQueueError(error)
     );
     throw error;
   }

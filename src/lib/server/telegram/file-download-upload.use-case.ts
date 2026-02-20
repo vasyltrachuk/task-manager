@@ -30,8 +30,10 @@ function isMediaAttachment(mimeType: string | null, fileName: string): boolean {
  *   for the access-control prefix check in /api/documents/download.
  * - telegram_file_id is already stored during inbound processing; this job only
  *   updates storage_path (and mime/size if they were missing).
- * - Creates a `documents` record ONLY for real documents (PDF, DOCX, ZIP, etc.),
- *   NOT for voice messages, photos, stickers, or video notes.
+ * - Creates a `documents` record ONLY for real documents (PDF, DOCX, ZIP, etc.)
+ *   and only when attachment is linked to an existing client.
+ * - Does NOT create a `documents` row for voice messages, photos, stickers,
+ *   video notes, or unknown contacts without linked client.
  */
 export async function processFileDownloadUpload(payload: FileDownloadUploadJob): Promise<void> {
   const attachmentLookup = await supabaseAdmin
@@ -68,6 +70,10 @@ export async function processFileDownloadUpload(payload: FileDownloadUploadJob):
   // Only create a documents record for actual document files, not media.
   if (isMediaAttachment(payload.mimeType ?? null, safeName)) {
     return; // voice, photo, sticker, video_note — skip documents table
+  }
+
+  if (!payload.clientId) {
+    return; // Keep attachment in chat history, but skip documents library when contact has no linked client
   }
 
   const existingDocument = await supabaseAdmin

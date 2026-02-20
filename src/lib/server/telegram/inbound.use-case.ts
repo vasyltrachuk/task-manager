@@ -12,7 +12,14 @@ import {
   extractTelegramBody,
   getPrimaryTelegramMessage,
   parseTelegramUpdate,
+  type TelegramCallbackQuery,
 } from './types';
+import {
+  handleStaffLink,
+  handleStaffCallbackQuery,
+  handleStaffReply,
+  notifyStaff,
+} from './staff.use-case';
 
 interface TelegramContactRow {
   id: string;
@@ -31,74 +38,93 @@ interface ProcessInboundResult {
   fileJobs: FileDownloadUploadJob[];
 }
 
-function buildSyntheticTaxId(botId: string, telegramUserId: number): string {
-  const botPrefix = botId.replace(/-/g, '').slice(0, 8);
-  return `tg_${botPrefix}_${telegramUserId}`;
+function isMissingDurationSecondsColumnError(
+  error: { code?: string; message?: string } | null | undefined
+): boolean {
+  if (!error) return false;
+
+  const message = (error.message ?? '').toLowerCase();
+  const hasDurationRef = message.includes('duration_seconds');
+  if (!hasDurationRef) return false;
+
+  return error.code === '42703'
+    || error.code === 'PGRST204'
+    || message.includes('column')
+    || message.includes('schema cache');
 }
 
-async function resolveOrCreateClientForContact(input: {
+async function incrementConversationUnreadSafely(input: {
   tenantId: string;
-  botId: string;
-  contactId: string;
-  existingClientId: string | null;
-  telegramUserId: number;
-  suggestedName: string;
-  username?: string;
-}): Promise<string> {
-  if (input.existingClientId) {
-    return input.existingClientId;
+  conversationId: string;
+  lastMessageAt: string;
+  fallbackClientId: string | null;
+}): Promise<void> {
+  // Cast through `unknown` because generated DB types may lag behind migrations.
+  // Keep method call attached to the client instance (`supabaseAdmin.rpc(...)`) to preserve `this`.
+  const typedSupabase = supabaseAdmin as unknown as {
+    rpc: (
+      fn: 'increment_conversation_unread',
+      args: {
+        p_tenant_id: string;
+        p_conversation_id: string;
+        p_last_message_at: string;
+        p_client_id: string | null;
+      },
+    ) => Promise<{ error: { message: string } | null }>;
+  };
+
+  let incrementResult: { error: { message: string } | null };
+  try {
+    incrementResult = await typedSupabase.rpc('increment_conversation_unread', {
+      p_tenant_id: input.tenantId,
+      p_conversation_id: input.conversationId,
+      p_last_message_at: input.lastMessageAt,
+      p_client_id: input.fallbackClientId,
+    });
+  } catch (err) {
+    console.warn(
+      '[telegram_inbound_conversation_update] rpc threw, falling back to select+update:',
+      err instanceof Error ? err.message : err
+    );
+    incrementResult = { error: { message: 'rpc threw' } };
   }
 
-  const taxId = buildSyntheticTaxId(input.botId, input.telegramUserId);
+  if (!incrementResult.error) return;
 
-  const insertResult = await supabaseAdmin
-    .from('clients')
-    .insert({
-      tenant_id: input.tenantId,
-      name: input.suggestedName,
-      type: 'FOP',
-      tax_id_type: 'rnokpp',
-      tax_id: taxId,
-      status: 'onboarding',
-      contact_email: input.username ? `${input.username}@telegram.local` : null,
-      notes: 'Auto-created from Telegram inbound message.',
-    })
-    .select('id')
-    .single();
+  console.warn(
+    '[telegram_inbound_conversation_update] rpc failed, falling back to select+update:',
+    incrementResult.error.message
+  );
 
-  let clientId: string;
-  if (insertResult.error?.code === '23505') {
-    const existing = await supabaseAdmin
-      .from('clients')
-      .select('id')
-      .eq('tenant_id', input.tenantId)
-      .eq('tax_id', taxId)
-      .single();
+  const currentConversation = await supabaseAdmin
+    .from('conversations')
+    .select('unread_count, client_id')
+    .eq('tenant_id', input.tenantId)
+    .eq('id', input.conversationId)
+    .maybeSingle();
 
-    if (existing.error || !existing.data?.id) {
-      throw new Error(`[telegram_inbound_client_lookup] ${existing.error?.message ?? 'Client not found'}`);
-    }
-
-    clientId = existing.data.id;
-  } else if (insertResult.error || !insertResult.data?.id) {
-    throw new Error(`[telegram_inbound_client_create] ${insertResult.error?.message ?? 'No data returned'}`);
-  } else {
-    clientId = insertResult.data.id;
+  if (currentConversation.error || !currentConversation.data) {
+    console.warn(
+      '[telegram_inbound_conversation_update] fallback read failed:',
+      currentConversation.error?.message ?? 'Conversation not found'
+    );
+    return;
   }
 
-  const updateContactResult = await supabaseAdmin
-    .from('telegram_contacts')
+  const nextUnreadCount = Number(currentConversation.data.unread_count ?? 0) + 1;
+  const fallbackUpdate = await supabaseAdmin
+    .from('conversations')
     .update({
-      client_id: clientId,
+      unread_count: Number.isFinite(nextUnreadCount) ? nextUnreadCount : 1,
+      last_message_at: input.lastMessageAt,
+      client_id: currentConversation.data.client_id ?? input.fallbackClientId,
     })
     .eq('tenant_id', input.tenantId)
-    .eq('id', input.contactId);
+    .eq('id', input.conversationId);
 
-  if (updateContactResult.error) {
-    throw new Error(`[telegram_inbound_contact_link_client] ${updateContactResult.error.message}`);
+  if (fallbackUpdate.error) {
+    console.warn('[telegram_inbound_conversation_update] fallback update failed:', fallbackUpdate.error.message);
   }
-
-  return clientId;
 }
 
 async function resolveOrCreateContact(input: {
@@ -166,7 +192,7 @@ async function resolveOrCreateConversation(input: {
   tenantId: string;
   botId: string;
   contactId: string;
-  clientId: string;
+  clientId: string | null;
 }): Promise<ConversationRow> {
   const existing = await supabaseAdmin
     .from('conversations')
@@ -181,7 +207,7 @@ async function resolveOrCreateConversation(input: {
   }
 
   if (existing.data?.id) {
-    if (!existing.data.client_id) {
+    if (!existing.data.client_id && input.clientId) {
       const updateResult = await supabaseAdmin
         .from('conversations')
         .update({
@@ -197,7 +223,7 @@ async function resolveOrCreateConversation(input: {
 
     return {
       ...existing.data,
-      client_id: existing.data.client_id ?? input.clientId,
+      client_id: existing.data.client_id ?? input.clientId ?? null,
     };
   }
 
@@ -207,7 +233,7 @@ async function resolveOrCreateConversation(input: {
       tenant_id: input.tenantId,
       bot_id: input.botId,
       telegram_contact_id: input.contactId,
-      client_id: input.clientId,
+      client_id: input.clientId ?? null,
       status: 'open',
       unread_count: 0,
     })
@@ -229,14 +255,54 @@ export async function processInboundUpdate(job: InboundProcessJob): Promise<Proc
     return { skipped: true, fileJobs: [] };
   }
 
+  // ── Handle callback_query (e.g. "Reply" button press from staff) ─────
+  if (parsedUpdate.callback_query) {
+    await handleCallbackQueryIfStaff(job, parsedUpdate.callback_query);
+    return { skipped: true, fileJobs: [] };
+  }
+
   const message = getPrimaryTelegramMessage(parsedUpdate);
   if (!message) {
+    return { skipped: true, fileJobs: [] };
+  }
+
+  // ── Handle /start CODE for staff linking ──────────────────────────────
+  const messageText = message.text?.trim() ?? '';
+  const startMatch = messageText.match(/^\/start(?:@\w+)?\s+([A-Za-z0-9]{6})\s*$/i);
+  if (startMatch) {
+    const linkResult = await handleStaffLink({
+      tenantId: job.tenantId,
+      botId: job.botId,
+      chatId: message.chat.id,
+      code: startMatch[1].toUpperCase(),
+    });
+    const token = await lookupActiveBotToken({ tenantId: job.tenantId, botId: job.botId });
+    const bot = await createTelegramBotClient(token);
+    await bot.sendMessage({ chatId: message.chat.id, text: linkResult.message });
     return { skipped: true, fileJobs: [] };
   }
 
   const telegramUserId = message.from?.id ?? message.chat.id;
   if (!Number.isFinite(telegramUserId)) {
     throw new Error('[telegram_inbound_message] Missing telegram user id');
+  }
+
+  // ── Check if sender is a staff member ─────────────────────────────────
+  const staffProfile = await supabaseAdmin
+    .from('profiles')
+    .select('id, tenant_id')
+    .eq('telegram_chat_id', message.chat.id)
+    .maybeSingle();
+
+  if (staffProfile.data?.id && staffProfile.data.tenant_id === job.tenantId) {
+    await handleStaffReply({
+      tenantId: job.tenantId,
+      botId: job.botId,
+      chatId: message.chat.id,
+      profileId: staffProfile.data.id,
+      message,
+    });
+    return { skipped: true, fileJobs: [] };
   }
 
   const contact = await resolveOrCreateContact({
@@ -250,15 +316,7 @@ export async function processInboundUpdate(job: InboundProcessJob): Promise<Proc
   });
 
   const suggestedName = buildTelegramContactName(message);
-  const clientId = await resolveOrCreateClientForContact({
-    tenantId: job.tenantId,
-    botId: job.botId,
-    contactId: contact.id,
-    existingClientId: contact.client_id,
-    telegramUserId,
-    suggestedName,
-    username: message.from?.username,
-  });
+  const clientId = contact.client_id;
 
   const conversation = await resolveOrCreateConversation({
     tenantId: job.tenantId,
@@ -287,20 +345,6 @@ export async function processInboundUpdate(job: InboundProcessJob): Promise<Proc
   }
 
   const nowIso = new Date(message.date * 1000).toISOString();
-  // Atomic increment — avoids read-then-write race on unread_count.
-  // Uses `as any` because the RPC is added via migration 00006 and
-  // won't appear in generated types until `supabase gen types` is re-run.
-  const incrementResult = await (supabaseAdmin.rpc as any)('increment_conversation_unread', {
-    p_tenant_id: job.tenantId,
-    p_conversation_id: conversation.id,
-    p_last_message_at: nowIso,
-    p_client_id: conversation.client_id ? null : clientId,
-  });
-
-  if (incrementResult.error) {
-    throw new Error(`[telegram_inbound_conversation_update] ${incrementResult.error.message}`);
-  }
-
   const attachments = extractTelegramAttachments(message);
   const fileJobs: FileDownloadUploadJob[] = [];
 
@@ -339,11 +383,24 @@ export async function processInboundUpdate(job: InboundProcessJob): Promise<Proc
       attachmentPayload.duration_seconds = attachment.durationSeconds;
     }
 
-    const attachmentInsert = await supabaseAdmin
+    let attachmentInsert = await supabaseAdmin
       .from('message_attachments')
       .insert(attachmentPayload)
       .select('id')
       .single();
+
+    if (
+      attachmentInsert.error
+      && attachmentPayload.duration_seconds != null
+      && isMissingDurationSecondsColumnError(attachmentInsert.error)
+    ) {
+      delete attachmentPayload.duration_seconds;
+      attachmentInsert = await supabaseAdmin
+        .from('message_attachments')
+        .insert(attachmentPayload)
+        .select('id')
+        .single();
+    }
 
     if (attachmentInsert.error || !attachmentInsert.data?.id) {
       throw new Error(
@@ -363,10 +420,57 @@ export async function processInboundUpdate(job: InboundProcessJob): Promise<Proc
     });
   }
 
+  // Keep unread_count updates resilient across environments where RPC migration may lag behind code deploy.
+  await incrementConversationUnreadSafely({
+    tenantId: job.tenantId,
+    conversationId: conversation.id,
+    lastMessageAt: nowIso,
+    fallbackClientId: conversation.client_id ? null : clientId,
+  });
+
+  // ── Best-effort staff notification ──────────────────────────────────
+  try {
+    await notifyStaff({
+      tenantId: job.tenantId,
+      botId: job.botId,
+      conversationId: conversation.id,
+      messageBody: body,
+      clientName: suggestedName,
+    });
+  } catch (err) {
+    console.warn('[telegram_inbound_notify_staff] failed:', err instanceof Error ? err.message : err);
+  }
+
   return {
     skipped: false,
     conversationId: conversation.id,
     messageId: messageInsert.data.id,
     fileJobs,
   };
+}
+
+async function handleCallbackQueryIfStaff(
+  job: InboundProcessJob,
+  callbackQuery: TelegramCallbackQuery,
+): Promise<void> {
+  const chatId = callbackQuery.from.id;
+  const profile = await supabaseAdmin
+    .from('profiles')
+    .select('id, tenant_id')
+    .eq('telegram_chat_id', chatId)
+    .maybeSingle();
+
+  if (!profile.data?.id || profile.data.tenant_id !== job.tenantId) {
+    // Not staff or wrong tenant — ignore
+    return;
+  }
+
+  await handleStaffCallbackQuery({
+    tenantId: job.tenantId,
+    botId: job.botId,
+    chatId,
+    profileId: profile.data.id,
+    callbackQueryId: callbackQuery.id,
+    data: callbackQuery.data ?? '',
+  });
 }

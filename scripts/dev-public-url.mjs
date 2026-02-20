@@ -1,13 +1,9 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
 
-const CLOUDFLARED_URL_REGEX = /https:\/\/[a-z0-9-]+-[a-z0-9-]+\.trycloudflare\.com/i;
-const LOCALTUNNEL_URL_REGEX = /https:\/\/[a-z0-9.-]+\.(loca\.lt|localtunnel\.me)/i;
-const NGROK_URL_REGEX = /https:\/\/[a-z0-9-]+\.ngrok-free\.app/i;
 const TUNNEL_TIMEOUT_MS = 240_000;
+const NGROK_API_URL = 'http://127.0.0.1:4040/api/tunnels';
 
 function findBinary(name) {
   const result = spawnSync('which', [name], { encoding: 'utf8' });
@@ -51,179 +47,84 @@ function terminateProcess(child) {
   }, 3_000).unref();
 }
 
-function getLocalTunnelBin() {
-  const ext = process.platform === 'win32' ? '.cmd' : '';
-  const localBinary = path.join(process.cwd(), 'node_modules', '.bin', `lt${ext}`);
-  return existsSync(localBinary) ? localBinary : null;
+function tailText(input, maxChars = 1200) {
+  const trimmed = input.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return trimmed.slice(trimmed.length - maxChars);
 }
 
-function startTunnel(port) {
-  const cloudflaredPath = process.env.NO_CLOUDFLARED ? null : findBinary('cloudflared');
-
-  if (cloudflaredPath) {
-    const tunnelProcess = spawn(
-      cloudflaredPath,
-      ['tunnel', '--url', `http://127.0.0.1:${port}`, '--no-autoupdate'],
-      { stdio: ['ignore', 'pipe', 'pipe'] }
-    );
-
-    return {
-      provider: 'cloudflared',
-      process: tunnelProcess,
-      urlRegex: CLOUDFLARED_URL_REGEX,
-    };
-  }
-
+function startNgrok(port) {
   const ngrokPath = findBinary('ngrok');
-  if (ngrokPath) {
-    process.stdout.write('[public-url] Using ngrok.\n');
+  if (!ngrokPath) {
+    throw new Error('`ngrok` binary was not found in PATH. Install ngrok and run this command again.');
+  }
 
-    // Kill any stale ngrok sessions before starting a new one (free plan: 1 session limit).
+  process.stdout.write('[public-url] Using ngrok.\n');
+  if (process.platform !== 'win32') {
+    // Free ngrok plans may block multiple active sessions.
     spawnSync('pkill', ['-f', 'ngrok'], { stdio: 'ignore' });
-
-    const tunnelProcess = spawn(ngrokPath, ['http', String(port)], {
-      stdio: ['ignore', 'ignore', 'ignore'],
-    });
-
-    return {
-      provider: 'ngrok',
-      process: tunnelProcess,
-      urlRegex: NGROK_URL_REGEX,
-      via: 'ngrok-api',
-    };
   }
 
-  const localTunnelBin = getLocalTunnelBin();
-  if (localTunnelBin) {
-    process.stdout.write('[public-url] cloudflared is not installed, using local node_modules/.bin/lt.\n');
-
-    const tunnelProcess = spawn(localTunnelBin, ['--port', String(port), '--local-host', '127.0.0.1'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    return {
-      provider: 'localtunnel',
-      process: tunnelProcess,
-      urlRegex: LOCALTUNNEL_URL_REGEX,
-      via: 'local-bin',
-    };
-  }
-
-  process.stdout.write('[public-url] cloudflared is not installed, falling back to localtunnel via npx.\n');
-  process.stdout.write('[public-url] First npx run may take time while package is downloaded.\n');
-
-  const tunnelProcess = spawn('npx', ['localtunnel', '--port', String(port)], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      npm_config_yes: 'true',
-    },
+  const tunnelProcess = spawn(ngrokPath, ['http', String(port)], {
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  return {
-    provider: 'localtunnel',
-    process: tunnelProcess,
-    urlRegex: LOCALTUNNEL_URL_REGEX,
-    via: 'npx',
-  };
+  return tunnelProcess;
+}
+
+async function waitForNgrokUrl(tunnel, tunnelProvider, lastNgrokLogRef) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < TUNNEL_TIMEOUT_MS) {
+    if (tunnel.exitCode !== null) {
+      const details = tailText(lastNgrokLogRef.value);
+      if (details) {
+        throw new Error(
+          `${tunnelProvider} exited before URL was created (code ${tunnel.exitCode ?? 'unknown'}).\n${details}`
+        );
+      }
+      throw new Error(`${tunnelProvider} exited before URL was created (code ${tunnel.exitCode ?? 'unknown'}).`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    try {
+      const response = await fetch(NGROK_API_URL);
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      const publicUrl = data?.tunnels?.find((item) => item?.proto === 'https')?.public_url;
+      if (typeof publicUrl === 'string' && publicUrl.startsWith('https://')) {
+        return publicUrl;
+      }
+    } catch {
+      // ngrok local API is not ready yet.
+    }
+  }
+
+  throw new Error(`Timed out waiting for ${tunnelProvider} public URL.`);
 }
 
 async function main() {
   const port = parsePort(process.argv.slice(2));
-  const tunnelRuntime = startTunnel(port);
-  const tunnel = tunnelRuntime.process;
-  const tunnelProvider = tunnelRuntime.provider;
+  const tunnel = startNgrok(port);
+  const tunnelProvider = 'ngrok';
+  const lastNgrokLogRef = { value: '' };
 
-  process.stdout.write(`[public-url] Waiting for ${tunnelProvider} URL (up to ${Math.floor(TUNNEL_TIMEOUT_MS / 1000)}s)...\n`);
+  const onNgrokData = (chunk) => {
+    const text = String(chunk ?? '');
+    if (!text) return;
+    lastNgrokLogRef.value = tailText(`${lastNgrokLogRef.value}\n${text}`, 5000);
+  };
 
-  let resolvedUrl = null;
-  let tunnelClosed = false;
+  tunnel.stdout?.on('data', onNgrokData);
+  tunnel.stderr?.on('data', onNgrokData);
 
-  const tunnelUrl = await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`Timed out waiting for ${tunnelProvider} public URL.`));
-    }, TUNNEL_TIMEOUT_MS);
+  process.stdout.write(
+    `[public-url] Waiting for ${tunnelProvider} URL (up to ${Math.floor(TUNNEL_TIMEOUT_MS / 1000)}s)...\n`
+  );
 
-    // ngrok exposes its URL via local API, not stdout
-    if (tunnelRuntime.via === 'ngrok-api') {
-      const pollNgrok = async () => {
-        for (let attempt = 0; attempt < 30; attempt++) {
-          await new Promise((r) => setTimeout(r, 1000));
-          try {
-            const res = await fetch('http://127.0.0.1:4040/api/tunnels');
-            if (res.ok) {
-              const data = await res.json();
-              const publicUrl = data?.tunnels?.find((t) => t.proto === 'https')?.public_url;
-              if (publicUrl) {
-                clearTimeout(timeout);
-                resolve(publicUrl);
-                return;
-              }
-            }
-          } catch {
-            // not ready yet
-          }
-        }
-        clearTimeout(timeout);
-        reject(new Error('Timed out waiting for ngrok public URL.'));
-      };
-
-      tunnel.on('error', (error) => { clearTimeout(timeout); reject(error); });
-      tunnel.on('close', (code) => {
-        tunnelClosed = true;
-        if (!resolvedUrl) { clearTimeout(timeout); reject(new Error(`ngrok exited (code ${code ?? 'unknown'}).`)); }
-      });
-
-      pollNgrok();
-      return;
-    }
-
-    let sentPromptConfirmation = false;
-
-    const onData = (chunk) => {
-      const text = String(chunk);
-      const match = text.match(tunnelRuntime.urlRegex);
-      if (!resolvedUrl && match?.[0]) {
-        resolvedUrl = match[0];
-        clearTimeout(timeout);
-        resolve(resolvedUrl);
-        return;
-      }
-
-      // Some npm versions still ask interactive confirmation even with npm_config_yes.
-      if (
-        tunnelRuntime.via === 'npx' &&
-        !sentPromptConfirmation &&
-        /need to install|ok to proceed/i.test(text)
-      ) {
-        sentPromptConfirmation = true;
-        tunnel.stdin?.write('y\n');
-      }
-
-      const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-      for (const line of lines) {
-        process.stdout.write(`[public-url][${tunnelProvider}] ${line}\n`);
-      }
-    };
-
-    const onClose = (code) => {
-      tunnelClosed = true;
-      if (!resolvedUrl) {
-        clearTimeout(timeout);
-        reject(
-          new Error(`${tunnelProvider} exited before URL was created (code ${code ?? 'unknown'}).`)
-        );
-      }
-    };
-
-    tunnel.stdout?.on('data', onData);
-    tunnel.stderr?.on('data', onData);
-    tunnel.on('close', onClose);
-    tunnel.on('error', (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-  });
+  const tunnelUrl = await waitForNgrokUrl(tunnel, tunnelProvider, lastNgrokLogRef);
 
   process.stdout.write(`\n[public-url] Provider: ${tunnelProvider}\n`);
   process.stdout.write(`[public-url] ${tunnelUrl}\n`);
@@ -259,13 +160,21 @@ async function main() {
 
   tunnel.on('close', (code) => {
     if (shuttingDown) return;
-    if (tunnelClosed && dev.exitCode === null) {
+    if (dev.exitCode === null) {
       process.stderr.write(
         `[public-url] ${tunnelProvider} stopped unexpectedly (code ${code ?? 'unknown'}).\n`
       );
       terminateProcess(dev);
       process.exit(1);
     }
+  });
+
+  tunnel.on('error', (error) => {
+    if (shuttingDown) return;
+    process.stderr.write(`[public-url] ${error instanceof Error ? error.message : String(error)}\n`);
+    terminateProcess(dev);
+    terminateProcess(tunnel);
+    process.exit(1);
   });
 }
 

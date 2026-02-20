@@ -81,11 +81,19 @@ export interface TelegramMessage {
   sticker?: TelegramSticker;
 }
 
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
   edited_message?: TelegramMessage;
   channel_post?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
 }
 
 export interface ParsedTelegramAttachment {
@@ -229,6 +237,31 @@ function parseMessage(value: unknown): TelegramMessage | undefined {
   };
 }
 
+function parseCallbackQuery(value: unknown): TelegramCallbackQuery | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+
+  const id = asString(record.id);
+  if (!id) return undefined;
+
+  const fromRecord = asRecord(record.from);
+  const fromId = fromRecord ? asNumber(fromRecord.id) : null;
+  if (!fromRecord || fromId === null) return undefined;
+
+  return {
+    id,
+    from: {
+      id: fromId,
+      is_bot: Boolean(fromRecord.is_bot),
+      first_name: asString(fromRecord.first_name) ?? undefined,
+      last_name: asString(fromRecord.last_name) ?? undefined,
+      username: asString(fromRecord.username) ?? undefined,
+    },
+    message: parseMessage(record.message),
+    data: asString(record.data) ?? undefined,
+  };
+}
+
 export function parseTelegramUpdate(payload: unknown): TelegramUpdate | null {
   const record = asRecord(payload);
   if (!record) return null;
@@ -241,6 +274,7 @@ export function parseTelegramUpdate(payload: unknown): TelegramUpdate | null {
     message: parseMessage(record.message),
     edited_message: parseMessage(record.edited_message),
     channel_post: parseMessage(record.channel_post),
+    callback_query: parseCallbackQuery(record.callback_query),
   };
 }
 

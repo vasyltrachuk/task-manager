@@ -88,7 +88,7 @@ export default function LinkDocumentToTaskModal({
       <div className="relative bg-white rounded-2xl shadow-modal w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col mx-4 animate-in fade-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-surface-200">
           <div className="min-w-0">
-            <h3 className="text-base font-bold text-text-primary">Прив'язати документ до задачі</h3>
+            <h3 className="text-base font-bold text-text-primary">Прив&apos;язати документ до задачі</h3>
             <p className="text-xs text-text-muted mt-0.5 truncate">{document.file_name}</p>
           </div>
           <button
@@ -155,7 +155,7 @@ export default function LinkDocumentToTaskModal({
                     </div>
                     <span className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 flex-shrink-0">
                       {isPending ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
-                      Прив'язати
+                      Прив&apos;язати
                     </span>
                   </div>
                 </button>

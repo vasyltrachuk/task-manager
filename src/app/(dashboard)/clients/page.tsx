@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Search, Plus, Users, Pencil, Archive, ShieldCheck } from 'lucide-react';
 import { Client, CLIENT_TAX_ID_TYPE_LABELS, Profile } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
-import { cn, getInitials, formatMoneyUAH } from '@/lib/utils';
-import { getClientDisplayName } from '@/lib/client-name';
+import { cn, getInitials, formatMoneyUAH, formatShortName } from '@/lib/utils';
+import { getClientDisplayName, getClientShortDisplayName } from '@/lib/client-name';
 import { getTaxSystemLabel, isSingleTaxSystem, isVatPayerByTaxSystem } from '@/lib/tax';
 import { calculateClientBillingSnapshot, formatMinorMoneyUAH, normalizeInvoiceStatus } from '@/lib/billing';
 import ClientFormModal from '@/components/clients/client-form-modal';
@@ -111,6 +111,7 @@ function ClientCard({
     canManageClient: boolean;
 }) {
     const displayName = getClientDisplayName(client);
+    const shortDisplayName = getClientShortDisplayName(client);
     const initials = getInitials(displayName);
 
     const colors = [
@@ -171,7 +172,7 @@ function ClientCard({
                     {initials}
                 </div>
                 <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-semibold text-text-primary truncate">{displayName}</h3>
+                    <h3 className="text-sm font-semibold text-text-primary truncate">{shortDisplayName}</h3>
                     <p className="text-xs text-text-muted">
                         {CLIENT_TAX_ID_TYPE_LABELS[client.tax_id_type]}: {client.tax_id}
                     </p>
@@ -226,7 +227,7 @@ function ClientCard({
                 {client.accountants && client.accountants.length > 0 && (() => {
                     const iAmHere = client.accountants.some(a => a.id === currentUserId);
                     const othersCount = client.accountants.length - (iAmHere ? 1 : 0);
-                    const tooltipText = client.accountants.map(a => a.id === currentUserId ? 'Ви' : a.full_name).join(', ');
+                    const tooltipText = client.accountants.map(a => a.id === currentUserId ? 'Ви' : formatShortName(a.full_name)).join(', ');
 
                     return (
                         <div className="workers">
@@ -275,8 +276,8 @@ function ClientCard({
                                                 ? `Ви +${othersCount}`
                                                 : 'Ви'
                                             : client.accountants.length <= 2
-                                                ? client.accountants.map(a => a.full_name).join(', ')
-                                                : `${client.accountants[0].full_name} +${client.accountants.length - 1}`
+                                                ? client.accountants.map(a => formatShortName(a.full_name)).join(', ')
+                                                : `${formatShortName(client.accountants[0].full_name)} +${client.accountants.length - 1}`
                                         }
                                     </span>
                                 </div>
@@ -536,6 +537,7 @@ function ClientsPageContent() {
                         <tbody>
                             {filteredClients.map((client, index) => {
                                 const displayName = getClientDisplayName(client);
+                                const shortDisplayName = getClientShortDisplayName(client);
                                 const initials = getInitials(displayName);
                                 const colors = [
                                     'bg-blue-100 text-blue-700',
@@ -566,7 +568,7 @@ function ClientsPageContent() {
                                                     {initials}
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <div className="text-sm font-semibold text-text-primary truncate">{displayName}</div>
+                                                    <div className="text-sm font-semibold text-text-primary truncate">{shortDisplayName}</div>
                                                     <div className="text-xs text-text-muted">
                                                         {CLIENT_TAX_ID_TYPE_LABELS[client.tax_id_type]}: {client.tax_id}
                                                     </div>
@@ -603,7 +605,7 @@ function ClientsPageContent() {
                                                 const isMe = (acc: Profile) => acc.id === (profile?.id || '');
                                                 const iAmHere = client.accountants.some(isMe);
                                                 const othersCount = client.accountants.length - (iAmHere ? 1 : 0);
-                                                const tooltipText = client.accountants.map(a => isMe(a) ? 'Ви' : a.full_name).join(', ');
+                                                const tooltipText = client.accountants.map(a => isMe(a) ? 'Ви' : formatShortName(a.full_name)).join(', ');
 
                                                 return (
                                                     <div className="flex items-center gap-2" title={tooltipText}>
@@ -613,8 +615,8 @@ function ClientsPageContent() {
                                                                     ? `Ви +${othersCount}`
                                                                     : 'Ви'
                                                                 : client.accountants.length <= 2
-                                                                    ? client.accountants.map(a => a.full_name).join(', ')
-                                                                    : `${client.accountants[0].full_name} +${client.accountants.length - 1}`
+                                                                    ? client.accountants.map(a => formatShortName(a.full_name)).join(', ')
+                                                                    : `${formatShortName(client.accountants[0].full_name)} +${client.accountants.length - 1}`
                                                             }
                                                         </span>
                                                     </div>
@@ -669,7 +671,7 @@ function ClientsPageContent() {
                                                 {canQuickCreateTask && (
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); handleQuickCreateTask(client); }}
-                                                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-brand-50 text-text-muted hover:text-brand-600 transition-colors"
+                                                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-brand-50 hover:text-brand-600 transition-colors"
                                                         title="+ Додати завдання"
                                                     >
                                                         <Plus size={13} />
@@ -678,7 +680,7 @@ function ClientsPageContent() {
                                                 {canManageClient && (
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); handleEdit(client); }}
-                                                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-brand-50 text-text-muted hover:text-brand-600 transition-colors"
+                                                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-brand-50 hover:text-brand-600 transition-colors"
                                                         title="Редагувати"
                                                     >
                                                         <Pencil size={13} />
@@ -687,7 +689,7 @@ function ClientsPageContent() {
                                                 {canManageClient && client.status !== 'archived' && (
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); handleArchive(client.id); }}
-                                                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 text-text-muted hover:text-red-500 transition-colors"
+                                                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 hover:text-red-500 transition-colors"
                                                         title="Архівувати"
                                                     >
                                                         <Archive size={13} />

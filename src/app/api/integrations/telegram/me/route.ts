@@ -38,15 +38,88 @@ interface TelegramWebhookInfoResult {
 }
 
 const LOCAL_WEBHOOK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
+const NGROK_API_URL = process.env.NGROK_API_URL?.trim() || 'http://127.0.0.1:4040/api/tunnels';
 
-function getAppBaseUrl(request: Request): string {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+interface NgrokTunnelApiResponse {
+  tunnels?: Array<{
+    proto?: string;
+    public_url?: string;
+  }>;
+}
+
+function isLocalWebhookHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return LOCAL_WEBHOOK_HOSTNAMES.has(normalized) || normalized.endsWith('.localhost');
+}
+
+async function getNgrokBaseUrl(): Promise<string | null> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    const controller = new AbortController();
+    timeout = setTimeout(() => controller.abort(), 1200);
+    const response = await fetch(NGROK_API_URL, {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as NgrokTunnelApiResponse;
+    const tunnelUrl = data.tunnels?.find((item) => item?.proto === 'https')?.public_url?.trim();
+    if (!tunnelUrl) return null;
+
+    const normalized = tunnelUrl.replace(/\/+$/, '');
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== 'https:') return null;
+    if (isLocalWebhookHostname(parsed.hostname)) return null;
+    if (parsed.pathname !== '/' && parsed.pathname !== '') return null;
+
+    return normalized;
+  } catch {
+    return null;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function getAppBaseUrl(request: Request): Promise<string> {
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.trim()?.replace(/\/+$/, '');
   if (envUrl) {
-    return envUrl.replace(/\/+$/, '');
+    let hasPath = false;
+    try {
+      const parsed = new URL(envUrl);
+      hasPath = parsed.pathname !== '/' && parsed.pathname !== '';
+    } catch {
+      hasPath = true;
+    }
+
+    // In local development we allow fallback to the current ngrok URL when env
+    // still points to localhost/http from .env.local.
+    if (isPublicHttpsUrl(envUrl) && !hasPath) {
+      return envUrl;
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      return envUrl;
+    }
   }
 
   const url = new URL(request.url);
-  return `${url.protocol}//${url.host}`;
+  const fallbackBaseUrl = `${url.protocol}//${url.host}`;
+
+  if (url.protocol === 'https:' && !isLocalWebhookHostname(url.hostname)) {
+    return fallbackBaseUrl;
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    const ngrokBaseUrl = await getNgrokBaseUrl();
+    if (ngrokBaseUrl) {
+      return ngrokBaseUrl;
+    }
+  }
+
+  return fallbackBaseUrl;
 }
 
 function buildWebhookUrl(baseUrl: string, botPublicId: string): string {
@@ -59,7 +132,7 @@ function isPublicHttpsUrl(value: string | null): boolean {
   try {
     const parsed = new URL(value);
     const host = parsed.hostname.toLowerCase();
-    const isLocalHost = LOCAL_WEBHOOK_HOSTNAMES.has(host) || host.endsWith('.localhost');
+    const isLocalHost = isLocalWebhookHostname(host);
 
     return parsed.protocol === 'https:' && !isLocalHost;
   } catch {
@@ -120,7 +193,7 @@ async function setTelegramWebhook(token: string, webhookUrl: string, webhookSecr
   await callTelegramApi(token, 'setWebhook', {
     url: webhookUrl,
     secret_token: webhookSecret,
-    allowed_updates: ['message', 'edited_message', 'channel_post'],
+    allowed_updates: ['message', 'edited_message', 'channel_post', 'callback_query'],
     drop_pending_updates: false,
   });
 }
@@ -197,7 +270,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ botStatus: mapTelegramStatus(null, null, false) });
     }
 
-    const webhookUrl = buildWebhookUrl(getAppBaseUrl(request), bot.public_id);
+    const webhookUrl = buildWebhookUrl(await getAppBaseUrl(request), bot.public_id);
     let webhookSet = false;
 
     try {
@@ -226,7 +299,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Only admin can configure Telegram bot.' }, { status: 403 });
     }
 
-    const appBaseUrl = getAppBaseUrl(request);
+    const appBaseUrl = await getAppBaseUrl(request);
     assertPublicHttpsUrlForWebhook(appBaseUrl);
 
     const payload = (await request.json()) as Record<string, unknown>;
@@ -351,7 +424,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Telegram bot is not configured.' }, { status: 404 });
     }
 
-    const appBaseUrl = getAppBaseUrl(request);
+    const appBaseUrl = await getAppBaseUrl(request);
     assertPublicHttpsUrlForWebhook(appBaseUrl);
 
     const webhookUrl = buildWebhookUrl(appBaseUrl, bot.public_id);
@@ -376,7 +449,7 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
+export async function DELETE() {
   try {
     const { supabase, ctx } = await getSessionContext();
 

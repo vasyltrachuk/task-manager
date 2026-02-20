@@ -18,6 +18,7 @@ import {
     History,
     CheckCircle2,
     Wallet,
+    RefreshCw,
 } from 'lucide-react';
 import {
     ClientDocument,
@@ -39,6 +40,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { cn, formatDate, getInitials, isOverdue, formatMoneyUAH } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
+import { getClientAvatarUrl } from '@/lib/client-avatar';
 import { getDefaultClientAccountantId, getFirstActiveAccountantId } from '@/lib/client-accountants';
 import {
     calculateClientBillingSnapshot,
@@ -72,7 +74,7 @@ import {
     getVisibleTasksForUser,
     isAccountant,
 } from '@/lib/rbac';
-import { useClient } from '@/lib/hooks/use-clients';
+import { useClient, useRefreshClientAvatarFromChannel } from '@/lib/hooks/use-clients';
 import { useProfiles } from '@/lib/hooks/use-profiles';
 import { useLicensesByClient } from '@/lib/hooks/use-licenses';
 import { useTasksByClient, useCreateTask } from '@/lib/hooks/use-tasks';
@@ -165,11 +167,14 @@ export default function ClientProfilePage() {
     const { data: paymentsData } = usePayments();
     const { data: taxRulebook } = useTaxRulebook();
     const createTaskMutation = useCreateTask();
+    const refreshAvatarMutation = useRefreshClientAvatarFromChannel();
 
     const [activeTab, setActiveTab] = useState<TabKey>('overview');
     const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
     const [isLicenseFormOpen, setIsLicenseFormOpen] = useState(false);
     const [selectedDocument, setSelectedDocument] = useState<ClientDocument | null>(null);
+    const [avatarRefreshFeedback, setAvatarRefreshFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+    const [brokenClientAvatarUrl, setBrokenClientAvatarUrl] = useState<string | null>(null);
 
     const profiles = profilesData ?? [];
     const canCreateTaskForUser = profile ? canCreateTask(profile) : false;
@@ -225,6 +230,8 @@ export default function ClientProfilePage() {
         () => calculateClientBillingSnapshot(clientId, clientInvoices, clientPayments),
         [clientId, clientInvoices, clientPayments]
     );
+    const clientAvatarUrl = useMemo(() => getClientAvatarUrl(client), [client]);
+    const canShowClientAvatar = Boolean(clientAvatarUrl) && brokenClientAvatarUrl !== clientAvatarUrl;
 
     const taxProfile = useMemo(() => {
         if (!client) return undefined;
@@ -267,11 +274,13 @@ export default function ClientProfilePage() {
     });
 
     const documents = clientDocumentsData ?? [];
-    const clientConversations = clientConversationsData ?? [];
+    const clientConversations = useMemo(() => clientConversationsData ?? [], [clientConversationsData]);
     const clientConversationId = useMemo(() => {
         const openConversation = clientConversations.find((conversation) => conversation.status === 'open');
         return openConversation?.id ?? clientConversations[0]?.id ?? null;
     }, [clientConversations]);
+    const canRefreshAvatarFromChannel = profile ? (profile.role === 'admin' || isAccountant(profile)) : false;
+    const canRefreshAvatarNow = canRefreshAvatarFromChannel && clientConversations.length > 0;
 
     const historyEvents = useMemo(() => {
         if (!client) return [] as { id: string; title: string; details?: string; created_at: string; tone?: 'normal' | 'warning' }[];
@@ -368,6 +377,26 @@ export default function ClientProfilePage() {
         alert('Задачу звірки створено у розділі "Завдання".');
     };
 
+    const handleRefreshAvatarFromChannel = async () => {
+        if (!client) return;
+
+        setAvatarRefreshFeedback(null);
+
+        try {
+            await refreshAvatarMutation.mutateAsync(client.id);
+            setAvatarRefreshFeedback({
+                tone: 'success',
+                message: 'Фото клієнта оновлено з каналу.',
+            });
+            setBrokenClientAvatarUrl(null);
+        } catch (error) {
+            setAvatarRefreshFeedback({
+                tone: 'error',
+                message: error instanceof Error ? error.message : 'Не вдалося оновити фото клієнта.',
+            });
+        }
+    };
+
     const handleDownloadDocument = (doc: ClientDocument) => {
         const anchor = window.document.createElement('a');
         anchor.href = `/api/documents/download?path=${encodeURIComponent(doc.storage_path)}`;
@@ -459,26 +488,61 @@ export default function ClientProfilePage() {
     return (
         <div className="p-8">
             <div className="flex items-center justify-between mb-6">
-                <div className="min-w-0">
-                    <button
-                        onClick={() => router.push(backToClientsHref)}
-                        className="inline-flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary mb-2"
-                    >
-                        <ArrowLeft size={14} />
-                        До списку клієнтів
-                    </button>
-                    <h1 className="text-2xl font-bold text-text-primary truncate">{clientDisplayName}</h1>
-                    <p className="text-sm text-text-muted mt-1">
-                        {CLIENT_TYPE_LABELS[client.type]} • {CLIENT_TAX_ID_TYPE_LABELS[client.tax_id_type]}: {client.tax_id}
-                    </p>
-                    {client.industry && (
+                <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-14 h-14 rounded-xl bg-surface-100 text-text-secondary text-sm font-bold flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        {canShowClientAvatar && clientAvatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                                src={clientAvatarUrl}
+                                alt={clientDisplayName}
+                                className="w-full h-full object-cover"
+                                onError={() => setBrokenClientAvatarUrl(clientAvatarUrl)}
+                            />
+                        ) : (
+                            getInitials(clientDisplayName)
+                        )}
+                    </div>
+
+                    <div className="min-w-0">
+                        <button
+                            onClick={() => router.push(backToClientsHref)}
+                            className="inline-flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary mb-2"
+                        >
+                            <ArrowLeft size={14} />
+                            До списку клієнтів
+                        </button>
+                        <h1 className="text-2xl font-bold text-text-primary truncate">{clientDisplayName}</h1>
                         <p className="text-sm text-text-muted mt-1">
-                            {client.industry}
+                            {CLIENT_TYPE_LABELS[client.type]} • {CLIENT_TAX_ID_TYPE_LABELS[client.tax_id_type]}: {client.tax_id}
                         </p>
-                    )}
+                        {client.industry && (
+                            <p className="text-sm text-text-muted mt-1">
+                                {client.industry}
+                            </p>
+                        )}
+                        {avatarRefreshFeedback && (
+                            <p className={cn(
+                                'text-xs mt-1',
+                                avatarRefreshFeedback.tone === 'success' ? 'text-emerald-700' : 'text-red-600'
+                            )}>
+                                {avatarRefreshFeedback.message}
+                            </p>
+                        )}
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap justify-end">
+                    {canRefreshAvatarFromChannel && (
+                        <button
+                            onClick={() => void handleRefreshAvatarFromChannel()}
+                            disabled={refreshAvatarMutation.isPending || !canRefreshAvatarNow}
+                            title={!canRefreshAvatarNow ? 'Немає привʼязаного чату для цього клієнта' : undefined}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg border border-surface-200 bg-white hover:bg-surface-50 text-text-secondary text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                            <RefreshCw size={15} className={cn(refreshAvatarMutation.isPending && 'animate-spin')} />
+                            {refreshAvatarMutation.isPending ? 'Оновлюємо фото...' : 'Оновити фото з каналу'}
+                        </button>
+                    )}
                     {canCreateTaskForUser && (
                         <button
                             onClick={() => setIsTaskFormOpen(true)}

@@ -24,7 +24,7 @@ export interface OutboundSendJob {
 export interface FileDownloadUploadJob {
   tenantId: string;
   botId: string;
-  clientId: string;
+  clientId: string | null;
   attachmentId: string;
   telegramFileId: string;
   fileName: string;

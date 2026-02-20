@@ -96,6 +96,39 @@ export function useArchiveClient() {
   });
 }
 
+export function useRefreshClientAvatarFromChannel() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (clientId: string) => {
+      const response = await fetch(`/api/clients/${clientId}/avatar/refresh-channel`, {
+        method: 'POST',
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const errorMessage =
+          typeof (payload as { error?: unknown }).error === 'string'
+            ? (payload as { error: string }).error
+            : 'Не вдалося оновити фото клієнта з каналу.';
+        throw new Error(errorMessage);
+      }
+
+      return payload as {
+        ok: boolean;
+        avatarUrl: string;
+        avatarSource: string;
+        avatarUpdatedAt: string;
+      };
+    },
+    onSuccess: (_, clientId) => {
+      qc.invalidateQueries({ queryKey: queryKeys.clients.all });
+      qc.invalidateQueries({ queryKey: queryKeys.clients.detail(clientId) });
+      qc.invalidateQueries({ queryKey: queryKeys.conversations.all });
+    },
+  });
+}
+
 export function useDpsClientPrefill() {
   return useMutation({
     mutationFn: async (input: DpsClientPrefillInput): Promise<DpsClientPrefillResult> => {

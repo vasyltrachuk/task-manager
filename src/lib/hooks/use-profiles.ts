@@ -4,7 +4,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../query-keys';
 import { getSupabaseBrowserClient } from '../server/supabase-browser';
 import { mapDbProfile } from '../mappers';
-import { createProfile, updateProfile, deactivateProfile } from '../actions/profiles';
+import {
+  createProfile,
+  updateProfile,
+  deactivateProfile,
+  reactivateProfile,
+  deleteProfileSafely,
+  regenerateProfilePassword,
+} from '../actions/profiles';
 import type { Profile } from '../types';
 
 export function useProfiles() {
@@ -46,6 +53,36 @@ export function useDeactivateProfile() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (profileId: string) => deactivateProfile(profileId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.profiles.all });
+    },
+  });
+}
+
+export function useReactivateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (profileId: string) => reactivateProfile(profileId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.profiles.all });
+    },
+  });
+}
+
+export function useDeleteProfileSafely() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (profileId: string) => deleteProfileSafely(profileId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.profiles.all });
+    },
+  });
+}
+
+export function useRegenerateProfilePassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (profileId: string) => regenerateProfilePassword(profileId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.profiles.all });
     },

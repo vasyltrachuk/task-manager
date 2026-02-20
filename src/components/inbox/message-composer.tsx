@@ -16,10 +16,160 @@ interface MessageComposerProps {
   onClearDocument?: () => void;
 }
 
+const VOICE_MIME_TYPE_PRIORITY = [
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+  'audio/mp4',
+  'audio/m4a',
+  'audio/webm;codecs=opus',
+  'audio/webm',
+] as const;
+const TELEGRAM_VOICE_MIME_TYPE = 'audio/ogg;codecs=opus';
+const OPUS_RECORDER_UMD_PATH = '/opus-media-recorder/OpusMediaRecorder.umd.js';
+const OPUS_WORKER_PATH = '/opus-media-recorder/encoderWorker.umd.js';
+const OPUS_OGG_WASM_PATH = '/opus-media-recorder/OggOpusEncoder.wasm';
+
+interface OpusWorkerOptions {
+  encoderWorkerFactory?: () => Worker;
+  OggOpusEncoderWasmPath?: string;
+}
+
+type OpusMediaRecorderConstructor = new (
+  stream: MediaStream,
+  options?: MediaRecorderOptions,
+  workerOptions?: OpusWorkerOptions
+) => MediaRecorder;
+
+declare global {
+  interface Window {
+    OpusMediaRecorder?: OpusMediaRecorderConstructor;
+    __opusMediaRecorderLoadingPromise?: Promise<OpusMediaRecorderConstructor>;
+    __opusMediaRecorderAssertPatched?: boolean;
+  }
+}
+
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function normalizeAudioMimeType(value: string | null | undefined): string {
+  return (value ?? '').split(';')[0].trim().toLowerCase();
+}
+
+function extensionFromAudioMimeType(value: string | null | undefined): string {
+  const mime = normalizeAudioMimeType(value);
+  if (mime.includes('ogg')) return 'ogg';
+  if (mime.includes('webm')) return 'webm';
+  if (mime.includes('mp4') || mime.includes('m4a')) return 'm4a';
+  if (mime.includes('mpeg') || mime.includes('mp3')) return 'mp3';
+  return 'ogg';
+}
+
+function selectNativeRecorderMimeType(): string {
+  if (typeof MediaRecorder === 'undefined') return '';
+  return VOICE_MIME_TYPE_PRIORITY
+    .find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+}
+
+function toSafeErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'unknown error';
+}
+
+function ensureSafeConsoleAssertForOpusMediaRecorder(): void {
+  if (typeof window === 'undefined') return;
+  if (process.env.NODE_ENV !== 'development') return;
+  if (window.__opusMediaRecorderAssertPatched) return;
+
+  const originalAssert = console.assert.bind(console);
+  console.assert = (condition?: unknown, ...args: unknown[]) => {
+    if (condition) return;
+    const message = typeof args[0] === 'string'
+      ? args[0]
+      : '[voice] assertion failed inside opus-media-recorder';
+    originalAssert(false, message);
+  };
+  window.__opusMediaRecorderAssertPatched = true;
+}
+
+function loadOpusMediaRecorderFromUmd(): Promise<OpusMediaRecorderConstructor> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('OpusMediaRecorder доступний тільки в браузері'));
+  }
+  ensureSafeConsoleAssertForOpusMediaRecorder();
+
+  if (window.OpusMediaRecorder) {
+    return Promise.resolve(window.OpusMediaRecorder);
+  }
+
+  if (window.__opusMediaRecorderLoadingPromise) {
+    return window.__opusMediaRecorderLoadingPromise;
+  }
+
+  window.__opusMediaRecorderLoadingPromise = new Promise<OpusMediaRecorderConstructor>((resolve, reject) => {
+    const finishSuccess = () => {
+      if (!window.OpusMediaRecorder) {
+        window.__opusMediaRecorderLoadingPromise = undefined;
+        reject(new Error('OpusMediaRecorder UMD script loaded but global constructor is missing'));
+        return;
+      }
+      resolve(window.OpusMediaRecorder);
+    };
+
+    const fail = () => {
+      window.__opusMediaRecorderLoadingPromise = undefined;
+      reject(new Error('Failed to load OpusMediaRecorder UMD script'));
+    };
+
+    const existing = document.querySelector<HTMLScriptElement>('script[data-opus-media-recorder="true"]');
+    if (existing) {
+      existing.addEventListener('load', finishSuccess, { once: true });
+      existing.addEventListener('error', fail, { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = OPUS_RECORDER_UMD_PATH;
+    script.async = true;
+    script.dataset.opusMediaRecorder = 'true';
+    script.onload = finishSuccess;
+    script.onerror = fail;
+    document.head.appendChild(script);
+  });
+
+  return window.__opusMediaRecorderLoadingPromise;
+}
+
+async function createVoiceRecorder(stream: MediaStream): Promise<MediaRecorder> {
+  if (typeof MediaRecorder === 'undefined') {
+    throw new Error('MediaRecorder API недоступний у цьому браузері');
+  }
+
+  if (MediaRecorder.isTypeSupported(TELEGRAM_VOICE_MIME_TYPE)) {
+    return new MediaRecorder(stream, { mimeType: TELEGRAM_VOICE_MIME_TYPE });
+  }
+
+  const fallbackMimeType = selectNativeRecorderMimeType();
+
+  try {
+    const OpusMediaRecorder = await loadOpusMediaRecorderFromUmd();
+    return new OpusMediaRecorder(
+      stream,
+      { mimeType: TELEGRAM_VOICE_MIME_TYPE, audioBitsPerSecond: 32000 },
+      {
+        encoderWorkerFactory: () => new Worker(OPUS_WORKER_PATH),
+        OggOpusEncoderWasmPath: OPUS_OGG_WASM_PATH,
+      }
+    );
+  } catch (error) {
+    console.warn(
+      `[voice] opus-media-recorder unavailable, falling back to native MediaRecorder: ${toSafeErrorMessage(error)}`
+    );
+    return new MediaRecorder(stream, fallbackMimeType ? { mimeType: fallbackMimeType } : undefined);
+  }
 }
 
 export default function MessageComposer({
@@ -42,6 +192,7 @@ export default function MessageComposer({
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
+  const stopTimeRef = useRef<number | null>(null);
 
   const canSend = text.trim().length > 0 || !!selectedDocument;
   const isSending = sendMutation.isPending;
@@ -49,8 +200,12 @@ export default function MessageComposer({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
       if (mediaRecorderRef.current?.state === 'recording') {
+        stopTimeRef.current = Date.now();
         mediaRecorderRef.current.stop();
       }
     };
@@ -98,12 +253,9 @@ export default function MessageComposer({
     setVoiceError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg']
-        .find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
-
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const recorder = await createVoiceRecorder(stream);
       chunksRef.current = [];
+      stopTimeRef.current = null;
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -111,15 +263,24 @@ export default function MessageComposer({
 
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
-        if (timerRef.current) clearInterval(timerRef.current);
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
 
-        const duration = Math.round((Date.now() - startTimeRef.current) / 1000);
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/ogg' });
+        const stopTime = stopTimeRef.current ?? Date.now();
+        const elapsedMs = Math.max(0, stopTime - startTimeRef.current);
+        const duration = Math.max(1, Math.round(elapsedMs / 1000));
+        const recordedMimeType = normalizeAudioMimeType(recorder.mimeType || TELEGRAM_VOICE_MIME_TYPE);
+        const blob = new Blob(chunksRef.current, { type: recordedMimeType });
 
         if (blob.size === 0) {
           setVoiceError('Порожній запис');
           setIsRecording(false);
           setRecordingSeconds(0);
+          mediaRecorderRef.current = null;
+          startTimeRef.current = 0;
+          stopTimeRef.current = null;
           return;
         }
 
@@ -128,7 +289,8 @@ export default function MessageComposer({
 
         try {
           const formData = new FormData();
-          formData.append('audio', blob, 'voice.ogg');
+          const extension = extensionFromAudioMimeType(blob.type || recordedMimeType);
+          formData.append('audio', blob, `voice.${extension}`);
           formData.append('duration', String(duration));
 
           const response = await fetch(`/api/conversations/${conversationId}/voice`, {
@@ -147,6 +309,9 @@ export default function MessageComposer({
         } finally {
           setIsSendingVoice(false);
           setRecordingSeconds(0);
+          mediaRecorderRef.current = null;
+          startTimeRef.current = 0;
+          stopTimeRef.current = null;
         }
       };
 
@@ -162,22 +327,34 @@ export default function MessageComposer({
     } catch {
       setVoiceError('Немає доступу до мікрофону');
     }
-  }, [conversationId]);
+  }, [conversationId, qc]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current?.state === 'recording') {
+      stopTimeRef.current = Date.now();
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
       mediaRecorderRef.current.stop();
     }
   }, []);
 
   const cancelRecording = useCallback(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
+    stopTimeRef.current = Date.now();
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.ondataavailable = null;
       const mr = mediaRecorderRef.current;
       mr.onstop = () => { mr.stream?.getTracks().forEach((t) => t.stop()); };
       mr.stop();
     }
+    mediaRecorderRef.current = null;
+    startTimeRef.current = 0;
+    stopTimeRef.current = null;
     chunksRef.current = [];
     setIsRecording(false);
     setRecordingSeconds(0);

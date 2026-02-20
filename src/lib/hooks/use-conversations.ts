@@ -10,6 +10,26 @@ import type {
   ConversationStatus,
 } from '../types';
 
+const CONVERSATION_LIST_SELECT = `
+  *,
+  client:clients (
+    *,
+    client_accountants (
+      is_primary,
+      profile:profiles (*)
+    )
+  ),
+  telegram_contact:telegram_contacts (id, first_name, last_name, username),
+  assigned_accountant:profiles!conversations_assigned_accountant_id_fkey (*),
+  last_message:messages!messages_conversation_id_fkey (
+    id,
+    body,
+    direction,
+    created_at,
+    message_attachments (file_name, mime)
+  )
+`;
+
 export function useConversations(filters?: {
   status?: ConversationStatus;
   unreadOnly?: boolean;
@@ -22,12 +42,9 @@ export function useConversations(filters?: {
     queryFn: async (): Promise<ConversationListItem[]> => {
       let query = supabase
         .from('conversations')
-        .select(`
-          *,
-          client:clients (*),
-          telegram_contact:telegram_contacts (id, first_name, last_name, username),
-          assigned_accountant:profiles!conversations_assigned_accountant_id_fkey (*)
-        `)
+        .select(CONVERSATION_LIST_SELECT)
+        .order('created_at', { foreignTable: 'messages', ascending: false })
+        .limit(1, { foreignTable: 'messages' })
         .order('last_message_at', { ascending: false, nullsFirst: false });
 
       if (filters?.status) {
@@ -57,16 +74,14 @@ export function useConversation(id: string | null) {
     queryFn: async (): Promise<ConversationListItem | null> => {
       if (!id) return null;
 
-      const { data, error } = await supabase
+      const query = supabase
         .from('conversations')
-        .select(`
-          *,
-          client:clients (*),
-          telegram_contact:telegram_contacts (id, first_name, last_name, username),
-          assigned_accountant:profiles!conversations_assigned_accountant_id_fkey (*)
-        `)
+        .select(CONVERSATION_LIST_SELECT)
         .eq('id', id)
-        .single();
+        .order('created_at', { foreignTable: 'messages', ascending: false })
+        .limit(1, { foreignTable: 'messages' });
+
+      const { data, error } = await query.single();
 
       if (error) throw error;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -149,6 +164,42 @@ export function useMarkConversationRead() {
       if (error) throw error;
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.conversations.all });
+      qc.invalidateQueries({ queryKey: queryKeys.conversations.unreadTotal });
+    },
+  });
+}
+
+export function useLinkConversationClient() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      conversationId,
+      clientId,
+    }: {
+      conversationId: string;
+      clientId: string;
+    }) => {
+      const response = await fetch(`/api/conversations/${conversationId}/link-client`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ clientId }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const errorMessage =
+          typeof (payload as { error?: unknown }).error === 'string'
+            ? (payload as { error: string }).error
+            : 'Не вдалося привʼязати клієнта до бесіди.';
+        throw new Error(errorMessage);
+      }
+
+      return payload as { ok: boolean; alreadyLinked: boolean };
+    },
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: queryKeys.conversations.detail(variables.conversationId) });
       qc.invalidateQueries({ queryKey: queryKeys.conversations.all });
       qc.invalidateQueries({ queryKey: queryKeys.conversations.unreadTotal });
     },

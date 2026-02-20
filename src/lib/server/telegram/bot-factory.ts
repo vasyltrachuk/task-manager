@@ -38,7 +38,12 @@ interface TelegramSendVoiceResult {
 }
 
 export interface TelegramBotClient {
-  sendMessage(input: { chatId: number; text: string }): Promise<{ messageId: number }>;
+  sendMessage(input: {
+    chatId: number;
+    text: string;
+    reply_markup?: Record<string, unknown>;
+    parse_mode?: string;
+  }): Promise<{ messageId: number }>;
   sendDocument(input: { chatId: number; document: string; caption?: string }): Promise<{ messageId: number }>;
   /** Returns messageId + the voice file_id/file_unique_id from the sent message — use these instead of re-uploading to Storage */
   sendVoice(input: { chatId: number; voice: Blob | Buffer; mimeType?: string; duration?: number; caption?: string }): Promise<{
@@ -49,6 +54,7 @@ export interface TelegramBotClient {
   copyMessage(input: { fromChatId: number; toChatId: number; messageId: number }): Promise<{ messageId: number }>;
   getFile(input: { fileId: string }): Promise<{ filePath: string }>;
   downloadFile(input: { filePath: string }): Promise<ArrayBuffer>;
+  answerCallbackQuery(input: { callbackQueryId: string; text?: string }): Promise<void>;
 }
 
 interface GrammyBotApiLike {
@@ -125,6 +131,21 @@ function extractFilePath(result: unknown): string {
   return filePath;
 }
 
+function normalizeAudioMimeType(value: string | null | undefined): string | null {
+  const normalized = (value ?? '').split(';')[0].trim().toLowerCase();
+  return normalized || null;
+}
+
+function voiceFileNameFromMimeType(mimeType: string | null | undefined): string {
+  const normalized = normalizeAudioMimeType(mimeType);
+  if (!normalized) return 'voice.ogg';
+  if (normalized.includes('ogg')) return 'voice.ogg';
+  if (normalized.includes('webm')) return 'voice.webm';
+  if (normalized.includes('mp4') || normalized.includes('m4a')) return 'voice.m4a';
+  if (normalized.includes('mpeg') || normalized.includes('mp3')) return 'voice.mp3';
+  return 'voice.ogg';
+}
+
 async function callTelegramApiJson<T>(token: string, method: string, payload: Record<string, unknown>): Promise<T> {
   const response = await fetch(buildBotMethodUrl(token, method), {
     method: 'POST',
@@ -167,10 +188,14 @@ async function callTelegramApiFormData<T>(token: string, method: string, formDat
 function createHttpBotClient(token: string): TelegramBotClient {
   return {
     async sendMessage(input) {
-      const result = await callTelegramApiJson<TelegramMessageResult>(token, 'sendMessage', {
+      const payload: Record<string, unknown> = {
         chat_id: input.chatId,
         text: input.text,
-      });
+      };
+      if (input.reply_markup) payload.reply_markup = input.reply_markup;
+      if (input.parse_mode) payload.parse_mode = input.parse_mode;
+
+      const result = await callTelegramApiJson<TelegramMessageResult>(token, 'sendMessage', payload);
       return { messageId: result.message_id };
     },
     async sendDocument(input) {
@@ -187,11 +212,20 @@ function createHttpBotClient(token: string): TelegramBotClient {
     async sendVoice(input) {
       const form = new FormData();
       form.set('chat_id', String(input.chatId));
+      const inputMimeType = normalizeAudioMimeType(input.mimeType);
+      const blobMimeType = input.voice instanceof Blob ? normalizeAudioMimeType(input.voice.type) : null;
+      const effectiveMimeType = inputMimeType ?? blobMimeType ?? 'audio/ogg';
+
       const blob = input.voice instanceof Blob
-        ? input.voice
+        ? (
+          blobMimeType === effectiveMimeType
+            ? input.voice
+            : new Blob([input.voice], { type: effectiveMimeType })
+        )
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        : new Blob([input.voice as any], { type: input.mimeType ?? 'audio/ogg' });
-      form.set('voice', blob, 'voice.ogg');
+        : new Blob([input.voice as any], { type: effectiveMimeType });
+
+      form.set('voice', blob, voiceFileNameFromMimeType(effectiveMimeType));
       if (input.duration !== undefined) {
         form.set('duration', String(Math.round(input.duration)));
       }
@@ -233,6 +267,11 @@ function createHttpBotClient(token: string): TelegramBotClient {
 
       return response.arrayBuffer();
     },
+    async answerCallbackQuery(input) {
+      const payload: Record<string, unknown> = { callback_query_id: input.callbackQueryId };
+      if (input.text) payload.text = input.text;
+      await callTelegramApiJson(token, 'answerCallbackQuery', payload);
+    },
   };
 }
 
@@ -248,6 +287,10 @@ async function tryCreateGrammyBotClient(token: string): Promise<TelegramBotClien
 
     return {
       async sendMessage(input) {
+        // Grammy doesn't expose reply_markup/parse_mode easily — delegate to HTTP
+        if (input.reply_markup || input.parse_mode) {
+          return createHttpBotClient(token).sendMessage(input);
+        }
         const result = await bot.api.sendMessage(input.chatId, input.text);
         return { messageId: extractMessageId(result) };
       },
@@ -278,6 +321,9 @@ async function tryCreateGrammyBotClient(token: string): Promise<TelegramBotClien
           throw new Error(`Telegram file download HTTP ${response.status}: ${body || 'Unknown error'}`);
         }
         return response.arrayBuffer();
+      },
+      async answerCallbackQuery(input) {
+        return createHttpBotClient(token).answerCallbackQuery(input);
       },
     };
   } catch {

@@ -56,6 +56,23 @@ export function isDueSoon(dueDate: string, days: number = 3): boolean {
     return diff > 0 && diff < days * 86400000;
 }
 
+/**
+ * Скорочує ПІБ до формату «Прізвище І.Б.»
+ * Приклад: «Шевченко Тарас Григорович» → «Шевченко Т.Г.»
+ * Якщо передано лише прізвище — повертає як є.
+ */
+export function formatShortName(fullName: string): string {
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '';
+    const [last, ...rest] = parts;
+    const initials = rest
+        .map((p) => (p.match(/[\p{L}]/u)?.[0] ?? '').toUpperCase())
+        .filter(Boolean)
+        .map((c) => `${c}.`)
+        .join('');
+    return initials ? `${last} ${initials}` : last;
+}
+
 export function getInitials(name: string): string {
     const words = name.trim().split(/\s+/).filter(Boolean);
 

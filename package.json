@@ -5,12 +5,15 @@
   "scripts": {
     "dev": "next dev",
     "dev:public": "node scripts/dev-public-url.mjs",
+    "dev:public:restart": "node scripts/dev-restart-public.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "seed:dev": "npx tsx supabase/seed-dev.ts",
     "seed:inbox-demo": "node scripts/seed-inbox-demo.mjs",
+    "tenant:create": "node scripts/create-tenant.mjs",
     "clean:team-data": "node scripts/clear-admin-accountant-data.mjs",
+    "clean:inbox-history": "node scripts/clear-inbox-history.mjs",
     "clean:all-data": "node scripts/clear-supabase-all-data.mjs",
     "check:supabase-clean": "node scripts/check-supabase-cleanliness.mjs"
   },
@@ -29,6 +32,7 @@
     "date-fns": "^4.1.0",
     "lucide-react": "^0.564.0",
     "next": "16.1.6",
+    "opus-media-recorder": "^0.8.0",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
@@ -39,7 +43,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "localtunnel": "^2.0.2",
     "supabase": "^2.76.9",
     "tailwindcss": "^4",
     "typescript": "^5"
