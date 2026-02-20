@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { X, Building2, User, Phone, Mail, Hash, FileText, RefreshCw, MapPin, Calendar, Landmark, Tag } from 'lucide-react';
 import {
     Client,
@@ -12,28 +12,16 @@ import {
     CLIENT_TYPE_LABELS,
     CLIENT_TAX_ID_TYPE_LABELS,
     TAX_SYSTEM_LABELS,
-    type TaxRulebookConfig,
 } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
-import { cn, formatMoneyUAH } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import {
-    calculateIncomeLimitByTaxSystem,
-    isSingleTaxSystem,
     isVatPayerByTaxSystem,
     TAX_SYSTEM_UI_GROUPS,
 } from '@/lib/tax';
 import { canManageClients } from '@/lib/rbac';
 import { normalizeClientName } from '@/lib/client-name';
-import {
-    buildTaxProfile,
-    resolveObligations,
-    TAX_PROFILE_CADENCE_LABELS,
-    TAX_PROFILE_RISK_FLAG_LABELS,
-    TAX_PROFILE_SUBJECT_LABELS,
-} from '@/lib/tax-profile';
 import { useProfiles } from '@/lib/hooks/use-profiles';
-import { useTaxRulebook } from '@/lib/hooks/use-tax-rulebook';
-import { useLicenses } from '@/lib/hooks/use-licenses';
 import {
     useCreateClient,
     useDpsClientPrefill,
@@ -192,25 +180,12 @@ function getInitialFormData(editClient?: Client | null): ClientFormData {
 export default function ClientFormModal({ isOpen, onClose, editClient }: ClientFormModalProps) {
     const { profile } = useAuth();
     const { data: profilesData } = useProfiles();
-    const { data: taxRulebook } = useTaxRulebook();
-    const { data: licensesData } = useLicenses();
     const createClientMutation = useCreateClient();
     const updateClientMutation = useUpdateClient();
     const dpsPrefillMutation = useDpsClientPrefill();
 
     const assignees = (profilesData ?? []).filter(p => p.role === 'accountant' && p.is_active);
     const canManageClient = profile ? canManageClients(profile) : false;
-    const effectiveTaxRulebook: TaxRulebookConfig = taxRulebook ?? {
-        year: new Date().getFullYear(),
-        minimum_wage_on_january_1: 0,
-        single_tax_multipliers: {
-            single_tax_group1: 0,
-            single_tax_group2: 0,
-            single_tax_group3: 0,
-            single_tax_group4: 0,
-        },
-        vat_registration_threshold: 0,
-    };
 
     const [formData, setFormData] = useState<ClientFormData>(() => getInitialFormData(editClient));
 
@@ -220,82 +195,10 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
     const [dpsPrefillWarnings, setDpsPrefillWarnings] = useState<string[]>([]);
     const [lastPrefillSuggestion, setLastPrefillSuggestion] = useState<DpsClientPrefillSuggestion | null>(null);
     const [submitError, setSubmitError] = useState<string | null>(null);
-    const [showAnalytics, setShowAnalytics] = useState(Boolean(editClient));
     const normalizedTaxId = normalizeTaxIdInput(formData.tax_id);
     const isTaxIdValid = isTaxIdValidForType(normalizedTaxId, formData.tax_id_type);
-    const autoIncomeLimit = calculateIncomeLimitByTaxSystem(formData.tax_system, effectiveTaxRulebook);
-    const usesRulebookIncomeLimit = isSingleTaxSystem(formData.tax_system || undefined);
     const isVatPayer = isVatPayerByTaxSystem(formData.tax_system || undefined);
     const isSubmitting = createClientMutation.isPending || updateClientMutation.isPending;
-    const previewClient = useMemo<Client>(() => {
-        const normalizedName = normalizeClientName(formData.name);
-
-        return {
-            id: editClient?.id || 'preview-client',
-            name: normalizedName || formData.name || '—',
-            type: formData.type,
-            tax_id_type: formData.tax_id_type,
-            tax_id: normalizeTaxIdInput(formData.tax_id),
-            status: formData.status,
-            tax_system: formData.tax_system || undefined,
-            is_vat_payer: isVatPayerByTaxSystem(formData.tax_system || undefined),
-            income_limit: usesRulebookIncomeLimit ? autoIncomeLimit : undefined,
-            income_limit_source: usesRulebookIncomeLimit ? 'rulebook' : undefined,
-            contact_phone: formData.contact_phone || undefined,
-            contact_email: formData.contact_email || undefined,
-            employee_count: formData.employee_count || undefined,
-            industry: formData.industry || undefined,
-            notes: formData.notes || undefined,
-            accountants: assignees.filter((assignee) => formData.assignee_ids.includes(assignee.id)),
-            created_at: editClient?.created_at || '1970-01-01T00:00:00.000Z',
-            updated_at: editClient?.updated_at || '1970-01-01T00:00:00.000Z',
-        };
-    }, [
-        assignees,
-        autoIncomeLimit,
-        editClient?.created_at,
-        editClient?.id,
-        editClient?.updated_at,
-        formData.assignee_ids,
-        formData.contact_email,
-        formData.contact_phone,
-        formData.employee_count,
-        formData.industry,
-        formData.name,
-        formData.notes,
-        formData.status,
-        formData.tax_id,
-        formData.tax_id_type,
-        formData.tax_system,
-        formData.type,
-        usesRulebookIncomeLimit,
-    ]);
-    const previewLicenses = useMemo(
-        () => (editClient ? (licensesData ?? []).filter((license) => license.client_id === editClient.id) : []),
-        [editClient, licensesData]
-    );
-    const previewTaxProfile = useMemo(
-        () => buildTaxProfile({ client: previewClient, licenses: previewLicenses }),
-        [previewClient, previewLicenses]
-    );
-    const previewObligations = useMemo(
-        () => resolveObligations(previewTaxProfile),
-        [previewTaxProfile]
-    );
-    const previewObligationsByCadence = useMemo(() => {
-        const groups: Record<'monthly' | 'quarterly' | 'annual' | 'event', typeof previewObligations> = {
-            monthly: [],
-            quarterly: [],
-            annual: [],
-            event: [],
-        };
-
-        previewObligations.forEach((obligation) => {
-            groups[obligation.cadence].push(obligation);
-        });
-
-        return groups;
-    }, [previewObligations]);
 
     const validate = () => {
         const e: Record<string, string> = {};
@@ -328,12 +231,6 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
         if (!validate()) return;
         setSubmitError(null);
 
-        const resolvedIncomeLimit = usesRulebookIncomeLimit
-            ? autoIncomeLimit
-            : undefined;
-        const resolvedIncomeLimitSource: Client['income_limit_source'] = usesRulebookIncomeLimit
-            ? 'rulebook'
-            : undefined;
         const resolvedTaxSystem = formData.tax_system || undefined;
         const normalizedName = normalizeClientName(formData.name);
 
@@ -345,8 +242,6 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
             status: formData.status,
             tax_system: resolvedTaxSystem,
             is_vat_payer: isVatPayerByTaxSystem(resolvedTaxSystem),
-            income_limit: resolvedIncomeLimit,
-            income_limit_source: resolvedIncomeLimitSource,
             contact_phone: formData.contact_phone || undefined,
             contact_email: formData.contact_email || undefined,
             employee_count: formData.employee_count || undefined,
@@ -875,136 +770,6 @@ export default function ClientFormModal({ isOpen, onClose, editClient }: ClientF
                                 className="w-full px-4 py-3 bg-white border border-surface-200 rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-brand-200 transition-all resize-none"
                             />
                         </div>
-                    </section>
-
-                    {/* Analytics */}
-                    <section className="rounded-xl border border-surface-200 overflow-hidden">
-                        <button
-                            type="button"
-                            onClick={() => setShowAnalytics((prev) => !prev)}
-                            className="w-full flex items-center justify-between px-4 py-3 text-left bg-surface-50 hover:bg-surface-100 transition-colors"
-                        >
-                            <div>
-                                <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Податкова аналітика</p>
-                                <p className="text-[11px] text-text-muted mt-1">Ліміт доходу та preview обов&apos;язків.</p>
-                            </div>
-                            <span className="text-xs font-semibold text-brand-700">
-                                {showAnalytics ? 'Згорнути' : 'Показати'}
-                            </span>
-                        </button>
-
-                        {showAnalytics && (
-                            <div className="border-t border-surface-200 p-4 space-y-4">
-                                <div>
-                                    <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
-                                        Ліміт доходу (авто)
-                                    </label>
-                                    <div className="rounded-lg border border-surface-200 bg-surface-50 px-4 py-3">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <span className="text-sm text-text-muted">Розраховано за rulebook ({effectiveTaxRulebook.year})</span>
-                                            <span className={cn(
-                                                'text-sm font-semibold',
-                                                autoIncomeLimit ? 'text-brand-700' : 'text-text-muted'
-                                            )}>
-                                                {usesRulebookIncomeLimit && autoIncomeLimit ? formatMoneyUAH(autoIncomeLimit) : 'Не застосовується'}
-                                            </span>
-                                        </div>
-                                        <p className="text-xs text-text-muted mt-2">
-                                            Ліміт автоматично застосовується для ЄП 1/2/3 (з або без ПДВ)/4. Параметри редагуються в Налаштуваннях.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="rounded-xl border border-surface-200 bg-white p-4 space-y-4">
-                                    <div>
-                                        <h3 className="text-sm font-bold text-text-primary">Податковий профіль (preview)</h3>
-                                        <p className="text-xs text-text-muted mt-1">
-                                            Профіль формується автоматично з введених полів і каталогу обов&apos;язків.
-                                        </p>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                                        <div className="rounded-lg border border-surface-200 bg-surface-50 px-3 py-2">
-                                            <p className="text-xs text-text-muted">Subject</p>
-                                            <p className="font-semibold text-text-primary">
-                                                {TAX_PROFILE_SUBJECT_LABELS[previewTaxProfile.subject]}
-                                            </p>
-                                        </div>
-                                        <div className="rounded-lg border border-surface-200 bg-surface-50 px-3 py-2">
-                                            <p className="text-xs text-text-muted">VAT</p>
-                                            <p className={cn('font-semibold', previewTaxProfile.is_vat_payer ? 'text-status-done' : 'text-text-primary')}>
-                                                {previewTaxProfile.is_vat_payer ? 'Платник ПДВ' : 'Без ПДВ'}
-                                            </p>
-                                        </div>
-                                        <div className="rounded-lg border border-surface-200 bg-surface-50 px-3 py-2">
-                                            <p className="text-xs text-text-muted">Працівники</p>
-                                            <p className="font-semibold text-text-primary">
-                                                {previewTaxProfile.has_employees ? `${previewTaxProfile.employee_count} активних` : 'Немає працівників'}
-                                            </p>
-                                        </div>
-                                        <div className="rounded-lg border border-surface-200 bg-surface-50 px-3 py-2">
-                                            <p className="text-xs text-text-muted">Ліцензії</p>
-                                            <p className="font-semibold text-text-primary">
-                                                {previewTaxProfile.has_licenses ? `${previewTaxProfile.license_types.length} тип(ів)` : 'Немає ліцензій'}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    {previewTaxProfile.risk_flags.length > 0 && (
-                                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                                            <p className="text-xs font-semibold text-amber-700">
-                                                Недостатньо даних для повного профілю.
-                                            </p>
-                                            <div className="mt-1 space-y-1">
-                                                {previewTaxProfile.risk_flags.map((flag) => (
-                                                    <p key={flag} className="text-xs text-amber-700">
-                                                        {TAX_PROFILE_RISK_FLAG_LABELS[flag]}
-                                                    </p>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <div className="space-y-2">
-                                        <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-                                            Активні обов&apos;язки
-                                        </p>
-                                        {previewObligations.length > 0 ? (
-                                            <div className="space-y-2">
-                                                {(Object.keys(previewObligationsByCadence) as Array<keyof typeof previewObligationsByCadence>)
-                                                    .map((cadence) => {
-                                                        const obligations = previewObligationsByCadence[cadence];
-                                                        if (obligations.length === 0) return null;
-
-                                                        return (
-                                                            <div key={cadence}>
-                                                                <p className="text-[11px] font-semibold text-text-muted mb-1">
-                                                                    {TAX_PROFILE_CADENCE_LABELS[cadence]}
-                                                                </p>
-                                                                <div className="flex flex-wrap gap-2">
-                                                                    {obligations.map((obligation) => (
-                                                                        <span
-                                                                            key={obligation.code}
-                                                                            title={obligation.description}
-                                                                            className="inline-flex items-center rounded-full border border-surface-200 bg-surface-50 px-3 py-1 text-xs text-text-secondary"
-                                                                        >
-                                                                            {obligation.title}
-                                                                        </span>
-                                                                    ))}
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
-                                            </div>
-                                        ) : (
-                                            <p className="text-sm text-text-muted">
-                                                Для поточного набору полів обов&apos;язки ще не визначені.
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
                     </section>
 
                     {submitError && (

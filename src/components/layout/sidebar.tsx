@@ -14,6 +14,7 @@ import {
     UserRoundCog,
     Settings,
     Plug,
+    Scale,
     LogOut,
     PanelLeftOpen,
     PanelLeftClose,
@@ -51,6 +52,7 @@ const accountantNavItems: NavItem[] = [
 
 const adminSettingsItems = [
     { href: '/settings', label: 'Налаштування', icon: Settings },
+    { href: '/settings/tax-rules', label: 'Податкові правила', icon: Scale },
     { href: '/settings/integrations', label: 'Інтеграції', icon: Plug },
 ];
 

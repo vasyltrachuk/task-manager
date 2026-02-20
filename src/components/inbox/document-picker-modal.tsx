@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { X, FileText, Search } from 'lucide-react';
-import { cn, formatDate } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
 import { useClientDocuments } from '@/lib/hooks/use-documents';
 import type { ClientDocument } from '@/lib/types';
 

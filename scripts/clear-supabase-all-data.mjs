@@ -27,7 +27,6 @@ const DELETE_ORDER = [
   { table: 'telegram_updates_raw', column: 'id' },
   { table: 'telegram_contacts', column: 'id' },
   { table: 'client_accountants', column: 'client_id' },
-  { table: 'tax_rulebook_configs', column: 'id' },
   { table: 'tenant_members', column: 'tenant_id' },
   { table: 'tenant_bots', column: 'id' },
   { table: 'clients', column: 'id' },
@@ -152,4 +151,3 @@ main().catch((err) => {
   console.error('Cleanup failed:', err.message);
   process.exit(1);
 });
-

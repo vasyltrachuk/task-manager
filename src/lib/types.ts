@@ -17,12 +17,12 @@ export type TaxSystem =
   | 'general_vat'
   | 'non_profit';
 export type SingleTaxSystem = Extract<TaxSystem, 'single_tax_group1' | 'single_tax_group2' | 'single_tax_group3' | 'single_tax_group3_vat' | 'single_tax_group4'>;
-export type SingleTaxRulebookGroup = Extract<TaxSystem, 'single_tax_group1' | 'single_tax_group2' | 'single_tax_group3' | 'single_tax_group4'>;
 export type IncomeLimitSource = 'rulebook';
 
 export type TaskType =
   | 'tax_report'
   | 'payroll'
+  | 'payment'
   | 'reconciliation'
   | 'audit'
   | 'license'
@@ -105,6 +105,7 @@ export interface Client {
   avatar_url?: string;
   avatar_telegram_file_id?: string;
   avatar_updated_at?: string;
+  additional_tax_tags?: string[];
   created_at: string;
   updated_at: string;
   // Virtual / joined
@@ -360,13 +361,6 @@ export interface Notification {
   created_at: string;
 }
 
-export interface TaxRulebookConfig {
-  year: number;
-  minimum_wage_on_january_1: number;
-  single_tax_multipliers: Record<SingleTaxRulebookGroup, number>;
-  vat_registration_threshold: number;
-}
-
 export type DpsRegistryCode = 'ev' | 'pdv_act' | 'non-profit' | 'registration';
 export type DpsSnapshotStatus = 'ok' | 'not_found' | 'error' | 'stale';
 export type DpsSyncRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'skipped_no_token';
@@ -420,6 +414,7 @@ export const TASK_STATUS_COLORS: Record<TaskStatus, string> = {
 export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   tax_report: 'Звітність',
   payroll: 'Зарплата',
+  payment: 'Еквайринг/Оплата',
   reconciliation: 'Звірка',
   audit: 'Аудит',
   license: 'Ліцензія',
@@ -435,6 +430,7 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
 export const TASK_TYPE_COLORS: Record<TaskType, string> = {
   tax_report: '#3B82F6',
   payroll: '#8B5CF6',
+  payment: '#F59E0B',
   reconciliation: '#10B981',
   audit: '#6366F1',
   license: '#F59E0B',

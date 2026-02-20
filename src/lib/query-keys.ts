@@ -56,5 +56,8 @@ export const queryKeys = {
     byClient: (clientId: string) => ['documents', 'client', clientId] as const,
   },
 
-  taxRulebook: ['taxRulebook'] as const,
+  rulebook: {
+    activeVersion: ['rulebook', 'activeVersion'] as const,
+    rules: ['rulebook', 'rules'] as const,
+  },
 } as const;

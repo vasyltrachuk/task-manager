@@ -59,18 +59,5 @@ VALUES (
   'admin'
 );
 
--- 4. Tax rulebook for 2026
-INSERT INTO tax_rulebook_configs (tenant_id, year, minimum_wage_on_january_1, single_tax_multipliers, vat_registration_threshold)
-VALUES (
-  '00000000-0000-0000-0000-000000000001',
-  2026,
-  8647,
-  '{
-    "group1": 0.1,
-    "group2": 0.2,
-    "group3": 0.05,
-    "group3_vat": 0.03,
-    "group4_agriculture": null
-  }'::jsonb,
-  1000000
-);
+-- 4. Rulebook data is initialized through API:
+-- POST /api/internal/rulebook/init

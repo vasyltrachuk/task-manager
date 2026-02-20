@@ -38,7 +38,7 @@ import {
     PAYMENT_METHOD_LABELS,
 } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
-import { cn, formatDate, getInitials, isOverdue, formatMoneyUAH } from '@/lib/utils';
+import { cn, formatDate, getInitials, isOverdue } from '@/lib/utils';
 import { getClientDisplayName } from '@/lib/client-name';
 import { getClientAvatarUrl } from '@/lib/client-avatar';
 import { getDefaultClientAccountantId, getFirstActiveAccountantId } from '@/lib/client-accountants';
@@ -49,19 +49,9 @@ import {
     normalizeInvoiceStatus,
 } from '@/lib/billing';
 import {
-    getIncomeLimitControlMessage,
-    isSingleTaxSystem,
     isVatPayerByTaxSystem,
-    getTaxComplianceNotes,
     getTaxSystemLabel,
 } from '@/lib/tax';
-import {
-    TAX_PROFILE_CADENCE_LABELS,
-    TAX_PROFILE_RISK_FLAG_LABELS,
-    TAX_PROFILE_SUBJECT_LABELS,
-    buildTaxProfile,
-    resolveObligations,
-} from '@/lib/tax-profile';
 import TaskFormModal from '@/components/tasks/task-form-modal';
 import LicenseFormModal from '@/components/licenses/license-form-modal';
 import LinkDocumentToTaskModal from '@/components/documents/link-document-to-task-modal';
@@ -82,7 +72,6 @@ import { useClientDocuments } from '@/lib/hooks/use-documents';
 import { useConversations } from '@/lib/hooks/use-conversations';
 import { useInvoices, usePayments } from '@/lib/hooks/use-billing';
 import { useActivityLogByTasks } from '@/lib/hooks/use-activity-log';
-import { useTaxRulebook } from '@/lib/hooks/use-tax-rulebook';
 import ChatView from '@/components/inbox/chat-view';
 
 type TabKey = 'overview' | 'licenses' | 'billing' | 'tasks' | 'chat' | 'documents' | 'history';
@@ -165,7 +154,6 @@ export default function ClientProfilePage() {
     const { data: clientConversationsData, isLoading: isClientConversationsLoading } = useConversations(conversationFilters);
     const { data: invoicesData } = useInvoices();
     const { data: paymentsData } = usePayments();
-    const { data: taxRulebook } = useTaxRulebook();
     const createTaskMutation = useCreateTask();
     const refreshAvatarMutation = useRefreshClientAvatarFromChannel();
 
@@ -232,31 +220,6 @@ export default function ClientProfilePage() {
     );
     const clientAvatarUrl = useMemo(() => getClientAvatarUrl(client), [client]);
     const canShowClientAvatar = Boolean(clientAvatarUrl) && brokenClientAvatarUrl !== clientAvatarUrl;
-
-    const taxProfile = useMemo(() => {
-        if (!client) return undefined;
-        return buildTaxProfile({ client, licenses });
-    }, [client, licenses]);
-
-    const taxObligations = useMemo(() => {
-        if (!taxProfile) return [];
-        return resolveObligations(taxProfile);
-    }, [taxProfile]);
-
-    const obligationsByCadence = useMemo(() => {
-        const groups: Record<'monthly' | 'quarterly' | 'annual' | 'event', typeof taxObligations> = {
-            monthly: [],
-            quarterly: [],
-            annual: [],
-            event: [],
-        };
-
-        taxObligations.forEach((obligation) => {
-            groups[obligation.cadence].push(obligation);
-        });
-
-        return groups;
-    }, [taxObligations]);
 
     const activeTasks = tasks.filter((task) => task.status !== 'done');
     const completedTasks = tasks.filter((task) => task.status === 'done');
@@ -458,20 +421,6 @@ export default function ClientProfilePage() {
         );
     }
 
-    const effectiveTaxRulebook = taxRulebook ?? {
-        year: new Date().getFullYear(),
-        minimum_wage_on_january_1: 0,
-        single_tax_multipliers: {
-            single_tax_group1: 0,
-            single_tax_group2: 0,
-            single_tax_group3: 0,
-            single_tax_group4: 0,
-        },
-        vat_registration_threshold: 0,
-    };
-    const taxComplianceNotes = getTaxComplianceNotes(client, effectiveTaxRulebook);
-    const incomeLimitMessage = getIncomeLimitControlMessage(client);
-    const isIncomeLimitNotApplicable = !client.income_limit && (!client.tax_system || !isSingleTaxSystem(client.tax_system));
     const isVatPayer = isVatPayerByTaxSystem(client.tax_system);
     const clientDisplayName = getClientDisplayName(client);
 
@@ -595,123 +544,7 @@ export default function ClientProfilePage() {
 
             {activeTab === 'overview' && (
                 <div className="space-y-6">
-                    <div className={cn(
-                        'rounded-xl border px-4 py-3 text-sm',
-                        client.income_limit
-                            ? 'border-brand-200 bg-brand-50/50 text-brand-700'
-                            : isIncomeLimitNotApplicable
-                                ? 'border-surface-200 bg-surface-50 text-text-secondary'
-                                : 'border-amber-200 bg-amber-50 text-amber-700'
-                    )}>
-                        {incomeLimitMessage}
-                    </div>
-
-                    {taxComplianceNotes.length > 0 && (
-                        <div className="rounded-xl border border-surface-200 bg-white px-4 py-3">
-                            <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
-                                Контрольні умови
-                            </p>
-                            <div className="space-y-1.5">
-                                {taxComplianceNotes.slice(0, 2).map((note) => (
-                                    <p key={note} className="text-sm text-text-secondary">{note}</p>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
                     <DpsIntegrationPanel clientId={client.id} clientTaxId={client.tax_id} />
-
-                    {taxProfile && (
-                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-                            <div className="card p-5">
-                                <h2 className="text-sm font-bold text-text-primary uppercase tracking-wide mb-4">
-                                    Податковий профіль
-                                </h2>
-                                <div className="space-y-2 text-sm">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-text-muted">Subject</span>
-                                        <span className="font-medium text-text-primary">{TAX_PROFILE_SUBJECT_LABELS[taxProfile.subject]}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-text-muted">VAT</span>
-                                        <span className={cn('font-medium', taxProfile.is_vat_payer ? 'text-status-done' : 'text-text-secondary')}>
-                                            {taxProfile.is_vat_payer ? 'Платник ПДВ' : 'Без ПДВ'}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-text-muted">Працівники</span>
-                                        <span className={cn('font-medium', taxProfile.has_employees ? 'text-text-primary' : 'text-text-secondary')}>
-                                            {taxProfile.has_employees
-                                                ? `${taxProfile.employee_count} активних`
-                                                : 'Немає працівників'}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-text-muted">Ліцензії</span>
-                                        <span className={cn('font-medium', taxProfile.has_licenses ? 'text-text-primary' : 'text-text-secondary')}>
-                                            {taxProfile.has_licenses
-                                                ? `${taxProfile.license_types.length} тип(ів)`
-                                                : 'Немає ліцензій'}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {taxProfile.risk_flags.length > 0 && (
-                                    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                                        <p className="text-xs font-semibold text-amber-700">
-                                            Недостатньо даних для повного профілю.
-                                        </p>
-                                        <div className="mt-1 space-y-1">
-                                            {taxProfile.risk_flags.map((flag) => (
-                                                <p key={flag} className="text-xs text-amber-700">
-                                                    {TAX_PROFILE_RISK_FLAG_LABELS[flag]}
-                                                </p>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="card p-5">
-                                <h2 className="text-sm font-bold text-text-primary uppercase tracking-wide mb-4">
-                                    Активні обов&apos;язки
-                                </h2>
-
-                                {taxObligations.length > 0 ? (
-                                    <div className="space-y-3">
-                                        {(Object.keys(obligationsByCadence) as Array<keyof typeof obligationsByCadence>)
-                                            .map((cadence) => {
-                                                const obligations = obligationsByCadence[cadence];
-                                                if (obligations.length === 0) return null;
-
-                                                return (
-                                                    <div key={cadence}>
-                                                        <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5">
-                                                            {TAX_PROFILE_CADENCE_LABELS[cadence]}
-                                                        </p>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {obligations.map((obligation) => (
-                                                                <span
-                                                                    key={obligation.code}
-                                                                    title={obligation.description}
-                                                                    className="inline-flex items-center rounded-full border border-surface-200 bg-surface-50 px-3 py-1 text-xs text-text-secondary"
-                                                                >
-                                                                    {obligation.title}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                    </div>
-                                ) : (
-                                    <p className="text-sm text-text-muted">
-                                        Для цього клієнта поки немає застосовних обов&apos;язків.
-                                    </p>
-                                )}
-                            </div>
-                        </div>
-                    )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                         <div className="stat-card">
@@ -768,15 +601,6 @@ export default function ClientProfilePage() {
                                     <span className="text-text-muted">ПДВ</span>
                                     <span className={cn('font-medium', isVatPayer ? 'text-status-done' : 'text-text-muted')}>
                                         {isVatPayer ? 'Платник' : 'Без ПДВ'}
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-text-muted">Ліміт доходу</span>
-                                    <span className={cn(
-                                        'font-medium',
-                                        client.income_limit ? 'text-brand-700' : 'text-text-muted'
-                                    )}>
-                                        {client.income_limit ? formatMoneyUAH(client.income_limit) : 'Немає'}
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between">

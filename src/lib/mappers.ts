@@ -2,7 +2,7 @@ import type { Database } from './database.types';
 import type {
   Profile, Client, Task, SubTask, TaskComment, TaskFile,
   License, BillingPlan, Invoice, Payment, PaymentAllocation,
-  ActivityLogEntry, TaxRulebookConfig,
+  ActivityLogEntry,
   ConversationListItem, ConversationMessageWithAttachments,
   ClientDocument, MessageAttachment, ConversationMessagePreview,
   UserRole, ClientType, ClientTaxIdType, ClientStatus, TaxSystem,
@@ -10,7 +10,6 @@ import type {
   IncomeLimitSource, TaskStatus, TaskType, TaskPriority, RecurrenceType,
   LicenseType, LicenseStatus, LicensePaymentFrequency, LicenseCheckResult,
   BillingPlanCadence, BillingCurrency, InvoiceStatus, PaymentStatus, PaymentMethod,
-  SingleTaxRulebookGroup,
   ConversationStatus, MessageDirection, MessageSource, MessageDeliveryStatus,
 } from './types';
 
@@ -27,7 +26,6 @@ type DbInvoice = Database['public']['Tables']['invoices']['Row'];
 type DbPayment = Database['public']['Tables']['payments']['Row'];
 type DbPaymentAllocation = Database['public']['Tables']['payment_allocations']['Row'];
 type DbAuditLog = Database['public']['Tables']['audit_log']['Row'];
-type DbTaxRulebook = Database['public']['Tables']['tax_rulebook_configs']['Row'];
 
 // ── Profiles ──────────────────────────────────────────────
 
@@ -370,16 +368,5 @@ export function mapDbClientDocument(row: any): ClientDocument {
     tags: row.tags ?? [],
     created_by: row.created_by ?? null,
     created_at: row.created_at,
-  };
-}
-
-// ── Tax Rulebook ──────────────────────────────────────────
-
-export function mapDbTaxRulebook(row: DbTaxRulebook): TaxRulebookConfig {
-  return {
-    year: row.year,
-    minimum_wage_on_january_1: row.minimum_wage_on_january_1,
-    single_tax_multipliers: row.single_tax_multipliers as unknown as Record<SingleTaxRulebookGroup, number>,
-    vat_registration_threshold: row.vat_registration_threshold,
   };
 }

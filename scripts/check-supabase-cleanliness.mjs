@@ -27,7 +27,6 @@ const TABLES = [
   'task_documents',
   'task_files',
   'tasks',
-  'tax_rulebook_configs',
   'telegram_contacts',
   'telegram_updates_raw',
   'tenant_bots',
@@ -157,4 +156,3 @@ main().catch((err) => {
   console.error('Check failed:', err.message);
   process.exit(1);
 });
-

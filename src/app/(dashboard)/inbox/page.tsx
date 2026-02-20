@@ -107,11 +107,6 @@ export default function InboxPage() {
     return <AccessDeniedCard message="У вас немає доступу до розділу повідомлень." />;
   }
 
-  const unreadTotal = (scopedConversations ?? []).reduce(
-    (sum, conversation) => sum + (conversation.unread_count ?? 0),
-    0
-  );
-
   return (
     <div className="p-4 md:p-6 h-screen min-h-0">
       <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)_320px] gap-4 h-full min-h-0">
@@ -175,13 +170,6 @@ export default function InboxPage() {
                 );
               })}
             </div>
-          </div>
-
-          <div className="px-4 py-2 border-b border-surface-200 bg-surface-50 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-text-primary">Бесіди</h2>
-            <span className="text-xs text-text-muted">
-              {filteredConversations.length}/{scopedConversations.length}
-            </span>
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-2">

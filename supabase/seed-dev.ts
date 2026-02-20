@@ -446,29 +446,6 @@ async function main() {
   console.log(`  Inserted ${allocationsData.length} payment allocations.\n`);
 
   // ====================================================================
-  // 10. Tax rulebook config (upsert)
-  // ====================================================================
-  console.log('10. Upserting tax_rulebook_configs...');
-
-  const { error: taxError } = await supabase.from('tax_rulebook_configs').upsert(
-    {
-      tenant_id: TENANT_ID,
-      year: 2026,
-      minimum_wage_on_january_1: 8647,
-      single_tax_multipliers: {
-        single_tax_group1: 167,
-        single_tax_group2: 834,
-        single_tax_group3: 1167,
-        single_tax_group4: 1167,
-      },
-      vat_registration_threshold: 1_000_000,
-    },
-    { onConflict: 'tenant_id,year' }
-  );
-  if (taxError) throw new Error(`Tax rulebook: ${taxError.message}`);
-  console.log('  Upserted tax_rulebook_configs for 2026.\n');
-
-  // ====================================================================
   // Done!
   // ====================================================================
   console.log('='.repeat(60));
